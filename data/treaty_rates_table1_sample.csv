@@ -1,0 +1,45 @@
+country,payment_type,rate_pct,footnote,treaty_article,source_table_version,last_verified
+United Kingdom,dividend,15,General portfolio rate; direct-dividend rate (>=10% ownership) may be lower — not modeled, flag for review,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+United Kingdom,interest,0,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+United Kingdom,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+United Kingdom,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+United Kingdom,royalty_industrial_equipment,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+United Kingdom,royalty_know_how,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Canada,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. X,SAMPLE-DEMO-v1,2026-08-22
+Canada,interest,0,,Art. XI,SAMPLE-DEMO-v1,2026-08-22
+Canada,royalty_patent,0,,Art. XII,SAMPLE-DEMO-v1,2026-08-22
+Canada,royalty_copyright,0,Exempt except motion picture/TV — check footnote before relying,Art. XII,SAMPLE-DEMO-v1,2026-08-22
+Canada,royalty_industrial_equipment,0,,Art. XII,SAMPLE-DEMO-v1,2026-08-22
+Germany,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Germany,interest,0,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Germany,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Germany,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Japan,dividend,10,Direct-dividend rate (>=10% ownership, held 12mo) may be 0% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Japan,interest,10,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Japan,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Japan,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+India,dividend,25,,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+India,interest,15,10% for bank/financial-institution lenders — not modeled,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+India,royalty_patent,15,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+India,royalty_copyright,15,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Ireland,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Ireland,interest,0,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Ireland,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Ireland,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Australia,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Australia,interest,10,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Australia,royalty_patent,5,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Australia,royalty_copyright,5,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+France,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+France,interest,0,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+France,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+France,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Mexico,dividend,10,,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Mexico,interest,15,4.9%-10% for certain bank/public-debt lenders — not modeled,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Mexico,royalty_patent,10,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Mexico,royalty_copyright,10,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Switzerland,dividend,15,Direct-dividend rate (>=10% ownership) may be 5% — not modeled,Art. 10,SAMPLE-DEMO-v1,2026-08-22
+Switzerland,interest,0,,Art. 11,SAMPLE-DEMO-v1,2026-08-22
+Switzerland,royalty_patent,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Switzerland,royalty_copyright,0,,Art. 12,SAMPLE-DEMO-v1,2026-08-22
+Singapore,dividend,30,No US income tax treaty — statutory rate applies,N/A,SAMPLE-DEMO-v1,2026-08-22

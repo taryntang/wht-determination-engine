@@ -1,0 +1,13 @@
+vendor_id,vendor_name,payee_type,country,is_foreign,payment_type,gross_amount,doc_form,treaty_country_claimed,treaty_article,doc_expiration,is_eci,intermediary_type
+V001,Thames Analytics Ltd,corporation,United Kingdom,true,royalty_patent,15000,W-8BEN-E,United Kingdom,Art. 12,2027-06-30,false,none
+V002,Unnamed Consulting Co,corporation,Ireland,true,royalty_copyright,8000,none_on_file,,,,false,none
+V003,Alpine Software AG,corporation,Switzerland,true,royalty_patent,12000,W-8BEN-E,Switzerland,Art. 12,2025-01-01,false,none
+V004,Jane Okoro,individual,Nigeria,true,compensation_services,6000,none_on_file,,,,false,none
+V005,Kenji Sato,individual,Japan,true,scholarship_fellowship,3000,W-8BEN,,,2028-01-01,false,none
+V006,Maple Realty Holdings,individual,Canada,true,real_property_sale,450000,none_on_file,,,,false,none
+V007,Global Freight Partners LP,partnership,Germany,true,partnership_distributive_share_eci,40000,W-8IMY,,,,true,none
+V008,Riverside Capital Partners,partnership,France,true,partnership_interest_sale,120000,W-8BEN-E,,,,false,none
+V009,Acme Domestic Inc,corporation,United States,false,dividend,10000,none_on_file,,,,false,none
+V010,Nordic Custody Bank,corporation,Germany,true,dividend,5000,none_on_file,,,,false,qualified_intermediary_primary_wh
+V011,Bengal Tech Services,corporation,India,true,royalty_patent,9000,W-8ECI,,,,true,none
+V012,Meridian Trust Co,corporation,United Kingdom,true,interest_bank_deposit,2000,none_on_file,,,,false,none
