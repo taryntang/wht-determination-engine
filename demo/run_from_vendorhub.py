@@ -3,8 +3,11 @@
 Runs real VendorHub intake submissions through the WHT determination engine,
 in place of the synthetic CSV that demo/run_demo.py uses.
 
-This is the "propose" half only, same as run_demo.py — no human-review
-queue, no ERP push. See adapters/vendorhub.py for the mapping this relies
+This is the "propose" half only, same as run_demo.py — no ERP push. Each
+candidate's result is upserted into wht_determinations (keyed on
+vendor_request_id + category, so re-running updates rather than
+duplicates) for review_ui/app.py to pick up; a CSV is also written for a
+quick offline look. See adapters/vendorhub.py for the mapping this relies
 on and its documented gaps (no payment amounts, no treaty details, some
 categories/entity types skipped rather than guessed).
 
@@ -26,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from adapters.vendorhub import fetch_vendor_tax_requests, map_row_to_candidates
+from adapters.vendorhub import fetch_vendor_tax_requests, map_row_to_candidates, upsert_determination
 from wht_engine import determine_withholding
 
 AS_OF = date.today()
@@ -82,6 +85,7 @@ def main():
             if candidate.skip_reason:
                 n_skipped += 1
                 print(f"    ** SKIPPED (not run through engine) ** {candidate.skip_reason}")
+                upsert_determination(candidate, None)
                 out_rows.append(
                     {
                         "vendor_id": candidate.vendor_id,
@@ -101,6 +105,7 @@ def main():
                 continue
 
             det = determine_withholding(candidate.payment, as_of=AS_OF)
+            upsert_determination(candidate, det)
             n_determined += 1
             if det.confidence == "needs_review":
                 n_needs_review += 1
@@ -141,7 +146,8 @@ def main():
     print(f"{len(rows)} vendor submissions processed.")
     print(f"{n_determined} candidate payments run through the engine ({n_needs_review} flagged for review).")
     print(f"{n_skipped} candidates skipped (unmapped category/entity type — see notes column).")
-    print(f"Full results written to {out_path}")
+    print(f"Upserted into wht_determinations for review_ui/app.py.")
+    print(f"Full results also written to {out_path}")
 
 
 if __name__ == "__main__":

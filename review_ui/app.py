@@ -1,151 +1,215 @@
 """
-Review-queue prototype — the "not built yet" UI named in the engine's
-README: vendor, proposed determination, rationale, confidence,
-approve/edit/reject.
+Review-queue prototype — the human-review step named in the engine's
+README: vendor, proposed determination, rationale, confidence, and a
+reviewer's Approve / Override (rate + reasoning) / Reject decision.
 
-This is a viewer over a determinations CSV (produced by
-demo/run_from_vendorhub.py or demo/run_demo.py), not a new data source.
-Approve/reject decisions are held in Streamlit's session state only —
-there is no datastore behind them yet (see README's "What isn't built"
-list), so a page refresh resets them. That's a deliberate scope line, not
-an oversight: persisting review decisions belongs with the real datastore
-and audit-trail work called out there.
+Reads and writes wht_determinations directly (via adapters.vendorhub,
+using the Supabase service_role key from .env — never the public anon
+key). Unlike the earlier CSV-viewer prototype, decisions here are
+persisted: an Approve/Override/Reject click writes review_status,
+override_rate, override_reasoning, reviewer_name, and reviewed_at back to
+the row, and the database's own CHECK constraints (see the migration)
+reject an override with no rate/reasoning or a rejection with no
+reasoning — the UI mirrors those rules so a reviewer sees why a save
+failed rather than a raw Postgres error.
 
 Run: streamlit run review_ui/app.py
 """
 
 from __future__ import annotations
 
-import csv
+import sys
 from pathlib import Path
 
 import streamlit as st
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CSV_CANDIDATES = [
-    REPO_ROOT / "demo" / "output_vendorhub_determinations.csv",
-    REPO_ROOT / "demo" / "output_determinations.csv",
-]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from adapters.vendorhub import fetch_determinations, set_review_decision
+
+
+def _load_dotenv(path: Path) -> None:
+    import os
+
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 st.set_page_config(page_title="WHT Review Queue", layout="wide")
 
-
-def load_rows(csv_path: Path) -> list[dict]:
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def default_csv_path() -> Path | None:
-    for path in DEFAULT_CSV_CANDIDATES:
-        if path.exists():
-            return path
-    return None
-
-
-def row_key(row: dict, idx: int) -> str:
-    return f"{row.get('vendor_id', '')}:{row.get('category', '')}:{idx}"
-
-
 st.title("WHT Determination Review Queue")
 st.caption(
-    "Prototype reviewer view over the engine's proposed determinations. "
-    "Approve/Reject is session-only — nothing here is persisted yet."
+    "Live view of wht_determinations. Approve / Override / Reject decisions "
+    "are persisted immediately — this is the real reviewer step, not a demo file viewer."
 )
 
-csv_path_input = st.sidebar.text_input(
-    "Determinations CSV",
-    value=str(default_csv_path() or DEFAULT_CSV_CANDIDATES[0]),
-    help="Produced by demo/run_from_vendorhub.py (live VendorHub data) or demo/run_demo.py (synthetic).",
+reviewer_name = st.sidebar.text_input(
+    "Your name (recorded as reviewer_name)",
+    value=st.session_state.get("reviewer_name", ""),
+    help="No real authentication yet — this is a free-text attribution field, not a login.",
 )
-csv_path = Path(csv_path_input)
+st.session_state["reviewer_name"] = reviewer_name
 
-if not csv_path.exists():
-    st.warning(
-        f"No file found at `{csv_path}`. Run `python3 demo/run_from_vendorhub.py` "
-        "(or `demo/run_demo.py` for synthetic data) first, then reload."
+try:
+    rows = fetch_determinations()
+except RuntimeError as e:
+    st.error(str(e))
+    st.stop()
+except Exception as e:
+    st.error(f"Could not reach Supabase: {e}")
+    st.stop()
+
+if not rows:
+    st.info(
+        "No determinations yet. Run `python3 demo/run_from_vendorhub.py` "
+        "against a VendorHub submission first, then reload this page."
     )
     st.stop()
 
-rows = load_rows(csv_path)
-if not rows:
-    st.info("The CSV is empty — nothing to review.")
-    st.stop()
+for row in rows:
+    vendor = row.get("vendor_tax_requests") or {}
+    row["_vendor_name"] = vendor.get("legal_name", "(unknown vendor)")
+    row["_vendor_number"] = vendor.get("vendor_number", "")
 
-if "decisions" not in st.session_state:
-    st.session_state.decisions = {}
-
-confidence_options = sorted({r.get("confidence", "") for r in rows})
-regime_options = sorted({r.get("regime", "") for r in rows if r.get("regime")})
+confidence_options = sorted({r.get("confidence") or "" for r in rows})
+regime_options = sorted({r["regime"] for r in rows if r.get("regime")})
+status_options = sorted({r["review_status"] for r in rows if r.get("review_status")})
 
 with st.sidebar:
     st.subheader("Filters")
     selected_confidence = st.multiselect("Confidence", confidence_options, default=confidence_options)
-    selected_regime = st.multiselect("Regime", regime_options, default=regime_options)
+    selected_status = st.multiselect("Review status", status_options, default=status_options)
     vendor_search = st.text_input("Vendor name contains")
 
-filtered = []
-for idx, row in enumerate(rows):
-    if row.get("confidence", "") not in selected_confidence:
-        continue
-    if row.get("regime") and row.get("regime") not in selected_regime:
-        continue
-    if vendor_search and vendor_search.lower() not in row.get("vendor_name", "").lower():
-        continue
-    filtered.append((idx, row))
+filtered = [
+    r
+    for r in rows
+    if (r.get("confidence") or "") in selected_confidence
+    and r.get("review_status") in selected_status
+    and (not vendor_search or vendor_search.lower() in r["_vendor_name"].lower())
+]
 
 total = len(rows)
+pending = sum(1 for r in rows if r["review_status"] == "pending")
 needs_review = sum(1 for r in rows if r.get("confidence") == "needs_review")
 skipped = sum(1 for r in rows if r.get("confidence") == "skipped")
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total candidates", total)
-c2.metric("Needs review", needs_review)
-c3.metric("Skipped (unmapped)", skipped)
-c4.metric("Showing", len(filtered))
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Total", total)
+c2.metric("Pending", pending)
+c3.metric("Needs review", needs_review)
+c4.metric("Skipped (unmapped)", skipped)
+c5.metric("Showing", len(filtered))
 
 st.divider()
 
-CONFIDENCE_BADGE = {
-    "high": "🟢",
-    "needs_review": "🟡",
-    "skipped": "⚪",
+STATUS_BADGE = {
+    "pending": "⏳",
+    "approved": "✅",
+    "overridden": "✏️",
+    "rejected": "❌",
 }
+CONFIDENCE_ICON = {"high": "🟢", "needs_review": "🟡", "skipped": "⚪"}
 
-for idx, row in filtered:
-    key = row_key(row, idx)
-    decision = st.session_state.decisions.get(key, "pending")
-    badge = CONFIDENCE_BADGE.get(row.get("confidence", ""), "")
 
-    header = f"{badge} **{row.get('vendor_name', '(unknown)')}** — {row.get('category', '')}"
+def _refresh():
+    st.cache_data.clear()
+    st.rerun()
+
+
+for row in filtered:
+    det_id = row["id"]
+    status_badge = STATUS_BADGE.get(row["review_status"], "")
+    conf_icon = CONFIDENCE_ICON.get(row.get("confidence") or "", "")
+
+    header = f"{status_badge} {conf_icon} **{row['_vendor_name']}** — {row.get('category', '')}"
     if row.get("regime"):
         header += f" · {row['regime']}"
-    if decision != "pending":
-        header += f" · _{decision}_"
+    header += f" · _{row['review_status']}_"
 
     with st.expander(header):
-        left, right = st.columns([3, 1])
+        left, right = st.columns([3, 2])
+
         with left:
             if row.get("confidence") == "skipped":
-                st.write(f"**Skipped:** {row.get('notes', '')}")
+                st.write(f"**Skipped by the adapter:** {row.get('notes', '')}")
             else:
+                st.write(f"**Vendor ID:** `{row['_vendor_number']}`")
                 st.write(f"**Regime:** {row.get('regime', '')}")
                 st.write(f"**Withholding required:** {row.get('withholding_required', '')}")
-                st.write(f"**Rate:** {row.get('rate_pct', '')}%")
+                st.write(f"**Engine-proposed rate:** {row.get('rate', '')}%")
                 st.write(f"**Citation:** {row.get('citation', '')}")
                 st.write(f"**Rationale:** {row.get('rationale', '')}")
                 if row.get("flags"):
                     st.write(f"**Flags:** {row['flags']}")
                 if row.get("notes"):
                     st.write(f"**Notes:** {row['notes']}")
+
+            if row["review_status"] != "pending":
+                st.divider()
+                st.write(f"**Reviewer:** {row.get('reviewer_name', '')}")
+                st.write(f"**Reviewed at:** {row.get('reviewed_at', '')}")
+                if row["review_status"] == "overridden":
+                    st.write(f"**Override rate:** {row.get('override_rate', '')}%")
+                    st.write(f"**Override reasoning:** {row.get('override_reasoning', '')}")
+                elif row["review_status"] == "rejected":
+                    st.write(f"**Rejection reasoning:** {row.get('override_reasoning', '')}")
+
         with right:
-            st.write(f"Vendor ID: `{row.get('vendor_id', '')}`")
-            b1, b2, b3 = st.columns(3)
-            if b1.button("Approve", key=f"approve-{key}"):
-                st.session_state.decisions[key] = "approved"
-                st.rerun()
-            if b2.button("Edit", key=f"edit-{key}"):
-                st.session_state.decisions[key] = "needs edit"
-                st.rerun()
-            if b3.button("Reject", key=f"reject-{key}"):
-                st.session_state.decisions[key] = "rejected"
-                st.rerun()
+            if row.get("confidence") == "skipped":
+                st.caption("Skipped candidates aren't reviewable here — classify manually.")
+                continue
+
+            if not reviewer_name.strip():
+                st.info("Enter your name in the sidebar to record decisions.")
+
+            if st.button("Approve", key=f"approve-{det_id}", disabled=not reviewer_name.strip()):
+                set_review_decision(det_id, "approved", reviewer_name.strip())
+                _refresh()
+
+            st.write("**Override**")
+            override_rate = st.number_input(
+                "New rate (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(row.get("override_rate") or row.get("rate") or 0),
+                step=0.5,
+                key=f"rate-{det_id}",
+            )
+            override_reasoning = st.text_area(
+                "Reasoning (required to save an override or a rejection)",
+                value=row.get("override_reasoning") or "",
+                key=f"reason-{det_id}",
+            )
+            oc1, oc2 = st.columns(2)
+            if oc1.button("Save override", key=f"override-{det_id}", disabled=not reviewer_name.strip()):
+                if not override_reasoning.strip():
+                    st.error("Reasoning is required to save an override.")
+                else:
+                    set_review_decision(
+                        det_id,
+                        "overridden",
+                        reviewer_name.strip(),
+                        override_rate=override_rate,
+                        override_reasoning=override_reasoning.strip(),
+                    )
+                    _refresh()
+            if oc2.button("Reject", key=f"reject-{det_id}", disabled=not reviewer_name.strip()):
+                if not override_reasoning.strip():
+                    st.error("Reasoning is required to reject a determination.")
+                else:
+                    set_review_decision(
+                        det_id,
+                        "rejected",
+                        reviewer_name.strip(),
+                        override_reasoning=override_reasoning.strip(),
+                    )
+                    _refresh()

@@ -26,8 +26,11 @@ what determine_withholding() needs:
     engine, those are returned as skipped candidates with a reason, for a
     human reviewer to classify.
 
-This module only reads (via the Supabase service_role key — never the
-public anon key, which cannot SELECT). It performs no writes.
+This module always uses the Supabase service_role key — never VendorHub's
+public anon key, which can only INSERT into vendor_tax_requests/vendor_accounts
+and cannot SELECT at all, let alone read or write wht_determinations. It
+reads vendor_tax_requests, and both reads and writes wht_determinations
+(the engine's persisted output plus the tax reviewer's decision on it).
 """
 
 from __future__ import annotations
@@ -36,10 +39,13 @@ import json
 import os
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
+from wht_engine import ENGINE_VERSION
 from wht_engine.models import (
+    Determination,
     Documentation,
     DocForm,
     Payee,
@@ -49,6 +55,52 @@ from wht_engine.models import (
 )
 
 VENDOR_TAX_REQUESTS_TABLE = "vendor_tax_requests"
+DETERMINATIONS_TABLE = "wht_determinations"
+
+
+def _credentials(supabase_url: Optional[str], service_role_key: Optional[str]) -> tuple[str, str]:
+    supabase_url = supabase_url or os.environ.get("SUPABASE_URL")
+    service_role_key = service_role_key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not service_role_key:
+        raise RuntimeError(
+            "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must both be set "
+            "(env vars, or a local .env — see .env.example). The service_role "
+            "key is a real secret: never commit it or pass it on the command line."
+        )
+    return supabase_url.rstrip("/"), service_role_key
+
+
+def _supabase_request(
+    method: str,
+    path_and_query: str,
+    supabase_url: Optional[str] = None,
+    service_role_key: Optional[str] = None,
+    body: Optional[Any] = None,
+    prefer: Optional[str] = None,
+) -> Any:
+    """Shared PostgREST request helper. Always uses the service_role key —
+    this module never touches VendorHub's public anon key, which cannot
+    SELECT/UPDATE/INSERT outside its narrow public-facing insert policies.
+    """
+    base_url, service_role_key = _credentials(supabase_url, service_role_key)
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        f"{base_url}/rest/v1/{path_and_query}",
+        method=method,
+        headers=headers,
+        data=data,
+    )
+    with urllib.request.urlopen(req) as resp:
+        raw = resp.read()
+        return json.loads(raw) if raw else None
 
 # entity_type (VendorHub) -> (engine PayeeType or None, note-if-uncertain-or-unmapped)
 PAYEE_TYPE_MAP: dict[str, tuple[Optional[PayeeType], Optional[str]]] = {
@@ -108,7 +160,8 @@ _US_SOURCE_ANSWERS = {"A", "C"}  # A = within U.S., C = both
 class Candidate:
     """One candidate Payment derived from a single vendor + income category."""
 
-    vendor_id: str
+    vendor_request_id: str  # vendor_tax_requests.id (uuid) -- the real FK target
+    vendor_id: str  # vendor_number, for display
     vendor_name: str
     category_label: str
     payment: Optional[Payment] = None
@@ -127,25 +180,112 @@ def fetch_vendor_tax_requests(
     SECURITY.md). Never hardcode the service_role key — pass it via
     environment variables (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).
     """
-    supabase_url = supabase_url or os.environ.get("SUPABASE_URL")
-    service_role_key = service_role_key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not supabase_url or not service_role_key:
-        raise RuntimeError(
-            "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must both be set "
-            "(env vars, or a local .env — see .env.example). The service_role "
-            "key is a real secret: never commit it or pass it on the command line."
-        )
-
-    url = f"{supabase_url.rstrip('/')}/rest/v1/{VENDOR_TAX_REQUESTS_TABLE}?select=*"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "apikey": service_role_key,
-            "Authorization": f"Bearer {service_role_key}",
-        },
+    return _supabase_request(
+        "GET",
+        f"{VENDOR_TAX_REQUESTS_TABLE}?select=*",
+        supabase_url,
+        service_role_key,
     )
-    with urllib.request.urlopen(req) as resp:
-        return json.load(resp)
+
+
+def upsert_determination(
+    candidate: "Candidate",
+    determination: Optional[Determination],
+    supabase_url: Optional[str] = None,
+    service_role_key: Optional[str] = None,
+) -> dict:
+    """Persists one candidate's engine result (or skip reason) to
+    wht_determinations, keyed on (vendor_request_id, category) so re-running
+    the adapter updates the existing row instead of duplicating it.
+
+    Re-running never touches a row once a human has reviewed it beyond
+    resetting its engine-derived columns — review_status/override fields
+    are only ever written by set_review_decision, never here.
+    """
+    if determination is None:
+        row = {
+            "vendor_request_id": candidate.vendor_request_id,
+            "category": candidate.category_label,
+            "confidence": "skipped",
+            "notes": candidate.skip_reason,
+        }
+    else:
+        row = {
+            "vendor_request_id": candidate.vendor_request_id,
+            "category": candidate.category_label,
+            "regime": determination.regime,
+            "withholding_required": determination.withholding_required,
+            "rate": float(determination.rate) if determination.rate is not None else None,
+            "citation": determination.citation,
+            "rationale": determination.rationale,
+            "confidence": determination.confidence,
+            "flags": "; ".join(determination.flags) if determination.flags else None,
+            "notes": " | ".join(candidate.notes) if candidate.notes else None,
+            "engine_version": ENGINE_VERSION,
+        }
+
+    result = _supabase_request(
+        "POST",
+        f"{DETERMINATIONS_TABLE}?on_conflict=vendor_request_id,category",
+        supabase_url,
+        service_role_key,
+        body=row,
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    return result[0] if isinstance(result, list) else result
+
+
+def fetch_determinations(
+    supabase_url: Optional[str] = None,
+    service_role_key: Optional[str] = None,
+) -> list[dict]:
+    """All determinations, joined with the originating vendor's name/number
+    for display, newest first."""
+    return _supabase_request(
+        "GET",
+        f"{DETERMINATIONS_TABLE}"
+        "?select=*,vendor_tax_requests(legal_name,vendor_number)"
+        "&order=created_at.desc",
+        supabase_url,
+        service_role_key,
+    )
+
+
+def set_review_decision(
+    determination_id: str,
+    review_status: str,
+    reviewer_name: str,
+    override_rate: Optional[float] = None,
+    override_reasoning: Optional[str] = None,
+    supabase_url: Optional[str] = None,
+    service_role_key: Optional[str] = None,
+) -> dict:
+    """Records a tax reviewer's decision on one determination. review_status
+    must be 'approved', 'overridden', or 'rejected' — the database itself
+    enforces that 'overridden' carries both an override_rate and
+    override_reasoning, and that 'rejected' carries a reasoning, via CHECK
+    constraints (see the migration), so a bad call here fails loudly rather
+    than silently persisting an unreasoned override.
+    """
+    if review_status not in ("approved", "overridden", "rejected"):
+        raise ValueError(f"Invalid review_status: {review_status!r}")
+
+    body = {
+        "review_status": review_status,
+        "reviewer_name": reviewer_name,
+        "override_rate": override_rate,
+        "override_reasoning": override_reasoning,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    result = _supabase_request(
+        "PATCH",
+        f"{DETERMINATIONS_TABLE}?id=eq.{determination_id}",
+        supabase_url,
+        service_role_key,
+        body=body,
+        prefer="return=representation",
+    )
+    return result[0] if isinstance(result, list) else result
 
 
 def _build_documentation(row: dict) -> tuple[Documentation, list[str]]:
@@ -169,9 +309,18 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
     U.S.-source-or-both income category the vendor flagged, plus any
     skipped (unmapped) candidates with a reason for a human reviewer.
     """
+    vendor_request_id = row["id"]
     vendor_id = row["vendor_number"]
     vendor_name = row["legal_name"]
     candidates: list[Candidate] = []
+
+    def _candidate(**kwargs) -> Candidate:
+        return Candidate(
+            vendor_request_id=vendor_request_id,
+            vendor_id=vendor_id,
+            vendor_name=vendor_name,
+            **kwargs,
+        )
 
     payee_type, payee_note = PAYEE_TYPE_MAP.get(
         row["entity_type"], (None, f"Unrecognized entity_type {row['entity_type']!r}.")
@@ -180,14 +329,7 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
     documentation, doc_notes = _build_documentation(row)
 
     if payee_type is None:
-        candidates.append(
-            Candidate(
-                vendor_id=vendor_id,
-                vendor_name=vendor_name,
-                category_label="(all categories)",
-                skip_reason=payee_note,
-            )
-        )
+        candidates.append(_candidate(category_label="(all categories)", skip_reason=payee_note))
         return candidates
 
     payee = Payee(
@@ -214,9 +356,7 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
         # hand a reviewer a specific-looking but unverified rate, so skip.
         if column == "q5_royalties":
             candidates.append(
-                Candidate(
-                    vendor_id=vendor_id,
-                    vendor_name=vendor_name,
+                _candidate(
                     category_label=label,
                     skip_reason=(
                         "Royalty subtype (patent vs. copyright vs. know-how, "
@@ -235,9 +375,7 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
         # question the engine doesn't model) — skip rather than mislabel.
         if column == "q2_services" and payee_type != PayeeType.INDIVIDUAL:
             candidates.append(
-                Candidate(
-                    vendor_id=vendor_id,
-                    vendor_name=vendor_name,
+                _candidate(
                     category_label=label,
                     skip_reason=(
                         "Services income for a non-individual payee isn't "
@@ -267,21 +405,11 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
             "AMOUNT_NOT_CAPTURED_BY_INTAKE_FORM: gross_amount defaulted to 0; "
             "withholding_amount below is not meaningful on its own."
         )
-        candidates.append(
-            Candidate(
-                vendor_id=vendor_id,
-                vendor_name=vendor_name,
-                category_label=label,
-                payment=payment,
-                notes=notes,
-            )
-        )
+        candidates.append(_candidate(category_label=label, payment=payment, notes=notes))
 
     if not candidates:
         candidates.append(
-            Candidate(
-                vendor_id=vendor_id,
-                vendor_name=vendor_name,
+            _candidate(
                 category_label="(none)",
                 skip_reason="No category was marked U.S.-source or both — nothing to determine yet.",
             )

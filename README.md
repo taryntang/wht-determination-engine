@@ -133,19 +133,24 @@ intake form this engine's "vendor hub" input is modeled on. `adapters/vendorhub.
 reads real `vendor_tax_requests` rows over VendorHub's Supabase REST API and
 maps them into candidate `Payment`/`Payee` objects; `demo/run_from_vendorhub.py`
 runs those through `determine_withholding()` the same way `demo/run_demo.py`
-runs the synthetic CSV.
+runs the synthetic CSV, then **persists each result to a `wht_determinations`
+table** in the same Supabase project (see VendorHub's
+`supabase/migrations/20260906141541_add_wht_determinations.sql`) — keyed on
+`(vendor_request_id, category)`, so re-running updates existing rows rather
+than duplicating them, and never touches a row's review fields once a human
+has reviewed it.
 
 ```bash
 cp .env.example .env   # fill in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 python3 demo/run_from_vendorhub.py
 ```
 
-Reading real submissions requires VendorHub's Supabase `service_role` key
+Reading and writing requires VendorHub's Supabase `service_role` key
 (Project Settings -> API in the Supabase dashboard) — the public anon key
-embedded in VendorHub's HTML is insert-only and cannot `SELECT` (see
-VendorHub's `SECURITY.md`). The service_role key is a real secret: it lives
-only in a local, gitignored `.env` (see `.env.example`), never in code or
-on the command line.
+embedded in VendorHub's HTML is insert-only on two other tables and has no
+access to `wht_determinations` at all (see VendorHub's `SECURITY.md`). The
+service_role key is a real secret: it lives only in a local, gitignored
+`.env` (see `.env.example`), never in code or on the command line.
 
 **This mapping is intentionally partial, not a shortcut taken carelessly.**
 VendorHub is an onboarding form, not an invoice feed, so several things the
@@ -164,28 +169,35 @@ engine wants are structurally absent from it:
   types of `Other` or `International organization`. Each skip carries a
   reason in the output rather than silently disappearing.
 
-## Review queue UI (prototype)
+## Review queue UI
 
-A first pass at the human-review queue mentioned below: a Streamlit app
-that reads a determinations CSV (`demo/run_from_vendorhub.py` or
-`demo/run_demo.py` output) and shows each candidate — vendor, proposed
-regime/rate/citation, rationale, confidence, flags — with Approve / Edit /
-Reject actions.
+The human-review step: a Streamlit app that reads `wht_determinations`
+live and shows each candidate — vendor, proposed regime/rate/citation,
+rationale, confidence, flags — with Approve / Override / Reject actions.
+**Decisions are persisted immediately**, not session-only: Approve writes
+`review_status='approved'`; Override requires both a new rate and a
+reasoning text and writes `review_status='overridden'` with
+`override_rate`/`override_reasoning`; Reject requires a reasoning and
+writes `review_status='rejected'`. All three stamp `reviewer_name` (a
+free-text attribution field — there's no real authentication yet) and
+`reviewed_at`. The database's own CHECK constraints back this up
+independently of the UI (see the migration) — an unreasoned override or
+rejection is rejected at the database layer even if the UI's own check
+were ever bypassed.
 
 ```bash
 pip install -r review_ui/requirements.txt
-python3 demo/run_from_vendorhub.py   # or demo/run_demo.py, to populate a CSV first
+python3 demo/run_from_vendorhub.py   # populate wht_determinations first
 streamlit run review_ui/app.py
 ```
 
-**Decisions are session-only — nothing is persisted.** A page refresh
-resets every Approve/Edit/Reject back to pending; wiring that to a real
-datastore is still on the "what isn't built" list below.
-
 ## What isn't built (next steps toward the real architecture)
 
-- Persisting review-queue decisions (Approve/Edit/Reject in `review_ui/`
-  is session-state only right now).
+- Real reviewer authentication (`reviewer_name` in `review_ui/` is a
+  free-text field, not a login).
+- An automatic trigger from VendorHub submission to engine run — today
+  `demo/run_from_vendorhub.py` is run by hand; a Supabase database webhook
+  on `vendor_tax_requests` insert is the natural next step.
 - The Claude/LLM layer for parsing uploaded W-8 documents and generating
   plain-English reviewer rationale on top of this engine's structured output.
 - The push integration to Oracle's Party Tax Profile REST API (POST/PATCH)

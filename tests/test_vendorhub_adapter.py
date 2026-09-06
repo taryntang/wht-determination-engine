@@ -7,6 +7,7 @@ from wht_engine.models import PayeeType, PaymentType
 
 def _row(**overrides) -> dict:
     row = {
+        "id": "00000000-0000-0000-0000-000000000001",
         "vendor_number": "123456789",
         "legal_name": "Thames Analytics Ltd",
         "reg_country": "United Kingdom",
