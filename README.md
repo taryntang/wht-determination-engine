@@ -165,9 +165,14 @@ engine wants are structurally absent from it:
   treaty claim on the physical document. Flagged on every affected row.
 - **Some categories/entity types aren't modeled and are skipped rather than
   guessed**: sale of goods (not FDAP at all), an ambiguous patent-vs-copyright
-  royalty subtype, services income for a non-individual payee, and entity
-  types of `Other` or `International organization`. Each skip carries a
-  reason in the output rather than silently disappearing.
+  royalty subtype, and entity types of `Other` or `International organization`.
+  Each skip carries a reason in the output rather than silently disappearing.
+- **Services performed in the U.S. by a non-individual payee** (corporation,
+  partnership, etc.) are mapped to the FDAP catch-all with `is_eci` set only
+  if a W-8ECI is actually on file — not to personal-services/payroll routing,
+  which only applies to individuals. Absent a W-8ECI, this conservatively
+  withholds at the statutory rate pending one, rather than assuming a treaty
+  permanent-establishment exception applies (which this engine doesn't verify).
 
 ## Review queue UI
 

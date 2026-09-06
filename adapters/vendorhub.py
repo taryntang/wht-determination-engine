@@ -368,32 +368,51 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
             )
             continue
 
-        # Q2 (services): the engine only models personal-services
-        # compensation, which routes to payroll/Form 8233, not FDAP. That's
-        # a sound mapping for an individual payee but not for a business
-        # entity performing services (generally an ECI/business-income
-        # question the engine doesn't model) — skip rather than mislabel.
+        # Q2 (services): COMPENSATION_SERVICES is hard-routed to payroll by
+        # the engine regardless of is_eci (regime.py Step 1c precedes the
+        # ECI check at Step 1e) -- correct for an individual's personal
+        # services, wrong for a corporation/partnership, which doesn't
+        # have "wages" at all. Services performed WITHIN the U.S. by a
+        # non-individual payee generally create a U.S. trade or business
+        # for that payee (i.e. ECI), subject to exceptions this engine
+        # doesn't verify (treaty permanent-establishment thresholds
+        # chief among them) -- so map to the OTHER_FDAP catch-all instead
+        # of COMPENSATION_SERVICES, and only set is_eci when the payee has
+        # actually certified that via a W-8ECI on file. Without that
+        # certification, this conservatively falls through to ordinary
+        # FDAP withholding (statutory 30%, absent treaty details VendorHub
+        # doesn't capture anyway) rather than assuming no withholding is
+        # needed on an unverified ECI claim.
+        this_payment_type = payment_type
+        this_is_eci = False
         if column == "q2_services" and payee_type != PayeeType.INDIVIDUAL:
-            candidates.append(
-                _candidate(
-                    category_label=label,
-                    skip_reason=(
-                        "Services income for a non-individual payee isn't "
-                        "modeled by this engine (compensation-services only "
-                        "maps to personal-services/payroll routing) — likely "
-                        "an ECI/business-income question instead. Route to "
-                        "manual review."
-                    ),
+            this_payment_type = PaymentType.OTHER_FDAP
+            this_is_eci = documentation.form == DocForm.W8ECI
+            notes.append(
+                "Services performed within the U.S. by a non-individual "
+                "payee were mapped to the FDAP catch-all rather than "
+                "personal-services/payroll routing (which only applies to "
+                "individuals). "
+                + (
+                    "W-8ECI is on file, so treated as self-reported ECI "
+                    "(no withholding) -- confirm the certification is "
+                    "actually valid for this income before relying on this."
+                    if this_is_eci
+                    else "No W-8ECI on file, so withheld conservatively at "
+                    "the FDAP statutory rate pending one -- if this payee "
+                    "believes it has no U.S. trade or business here (e.g. a "
+                    "treaty permanent-establishment exception), that needs "
+                    "a human determination, not this default."
                 )
             )
-            continue
 
-        assert payment_type is not None
+        assert this_payment_type is not None
         payment = Payment(
             payment_id=f"{vendor_id}:{column}",
             payee=payee,
-            payment_type=payment_type,
+            payment_type=this_payment_type,
             gross_amount=Decimal("0"),
+            is_eci=this_is_eci,
             notes=(
                 "gross_amount is a placeholder — VendorHub is an onboarding "
                 "form and never captures an invoice/payment amount. Rate and "

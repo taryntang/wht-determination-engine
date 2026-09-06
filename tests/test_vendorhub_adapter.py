@@ -77,12 +77,29 @@ def test_services_for_individual_routes_to_payroll():
     assert det.regime == "PAYROLL_NOT_FDAP"
 
 
-def test_services_for_corporation_is_skipped_not_guessed():
+def test_services_for_corporation_without_w8eci_falls_through_to_fdap():
     row = _row(entity_type="Corporation", q2_services="A")
     candidates = map_row_to_candidates(row)
-    assert len(candidates) == 1
-    assert candidates[0].payment is None
-    assert candidates[0].skip_reason is not None
+    runnable = [c for c in candidates if c.payment is not None]
+    assert len(runnable) == 1
+    payment = runnable[0].payment
+    assert payment.payment_type == PaymentType.OTHER_FDAP
+    assert payment.is_eci is False
+    det = determine_withholding(payment)
+    assert det.regime == "FDAP"
+    assert det.rate == Decimal("30")  # conservative default pending an ECI certification
+
+
+def test_services_for_corporation_with_w8eci_is_self_reported():
+    row = _row(entity_type="Corporation", q2_services="A", w8_type="W-8ECI")
+    candidates = map_row_to_candidates(row)
+    runnable = [c for c in candidates if c.payment is not None]
+    assert len(runnable) == 1
+    payment = runnable[0].payment
+    assert payment.is_eci is True
+    det = determine_withholding(payment)
+    assert det.regime == "ECI_SELF_REPORTED"
+    assert det.withholding_required is False
 
 
 def test_unmodeled_entity_type_is_skipped_entirely():
