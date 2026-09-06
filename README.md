@@ -126,6 +126,44 @@ AP notification feed would consume.
   time figure that should live in versioned reference data in a real
   deployment, the same way the treaty table does — flagged as a TODO.
 
+## Connecting to VendorHub (real intake data)
+
+[VendorHub](https://github.com/taryntang/vendorhub) is the vendor-facing
+intake form this engine's "vendor hub" input is modeled on. `adapters/vendorhub.py`
+reads real `vendor_tax_requests` rows over VendorHub's Supabase REST API and
+maps them into candidate `Payment`/`Payee` objects; `demo/run_from_vendorhub.py`
+runs those through `determine_withholding()` the same way `demo/run_demo.py`
+runs the synthetic CSV.
+
+```bash
+cp .env.example .env   # fill in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+python3 demo/run_from_vendorhub.py
+```
+
+Reading real submissions requires VendorHub's Supabase `service_role` key
+(Project Settings -> API in the Supabase dashboard) — the public anon key
+embedded in VendorHub's HTML is insert-only and cannot `SELECT` (see
+VendorHub's `SECURITY.md`). The service_role key is a real secret: it lives
+only in a local, gitignored `.env` (see `.env.example`), never in code or
+on the command line.
+
+**This mapping is intentionally partial, not a shortcut taken carelessly.**
+VendorHub is an onboarding form, not an invoice feed, so several things the
+engine wants are structurally absent from it:
+
+- **No payment amount.** Every candidate's `gross_amount` is a `Decimal("0")`
+  placeholder — `regime`, `rate`, and `citation` are meaningful, `withholding_amount`
+  is not, until a real payment is known.
+- **No treaty claim details.** VendorHub records a W-8 *type* but not a
+  treaty country/article/expiration, so the engine correctly falls back to
+  the 30% statutory rate even for vendors who may actually have a valid
+  treaty claim on the physical document. Flagged on every affected row.
+- **Some categories/entity types aren't modeled and are skipped rather than
+  guessed**: sale of goods (not FDAP at all), an ambiguous patent-vs-copyright
+  royalty subtype, services income for a non-individual payee, and entity
+  types of `Other` or `International organization`. Each skip carries a
+  reason in the output rather than silently disappearing.
+
 ## What isn't built (next steps toward the real architecture)
 
 - The human-review queue UI (a Streamlit app was the plan — vendor,

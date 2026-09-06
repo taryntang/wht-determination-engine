@@ -5,4 +5,6 @@ __pycache__/
 venv/
 *.egg-info/
 demo/output_determinations.csv
+demo/output_vendorhub_determinations.csv
 .DS_Store
+.env
