@@ -33,7 +33,7 @@ from typing import Optional
 
 from .models import PaymentType
 
-_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "treaty_rates_table1_sample.csv"
+_DATA_PATH = Path(__file__).resolve().parent / "data" / "treaty_rates_table1_sample.csv"
 
 
 @dataclass

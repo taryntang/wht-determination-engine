@@ -53,7 +53,7 @@ vendor hub data (CSV here; a real system's vendor master + payment feed)
   [not built here] human review queue -> approval -> push to AP / Oracle Party Tax Profile API
 ```
 
-The treaty rate table (`data/treaty_rates_table1_sample.csv`) is
+The treaty rate table (`wht_engine/data/treaty_rates_table1_sample.csv`) is
 deliberately external, versioned reference data rather than rate literals
 buried in the code — the same principle a real deployment would use to keep
 "which rate applied to this vendor eight months ago" answerable.
