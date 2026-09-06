@@ -430,7 +430,17 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
         candidates.append(
             _candidate(
                 category_label="(none)",
-                skip_reason="No category was marked U.S.-source or both — nothing to determine yet.",
+                skip_reason=(
+                    "None of this vendor's reported income sourcing questions "
+                    "were marked 'within U.S.' or 'both', so no withholding tax "
+                    "applies based on what was submitted. Worth flagging before "
+                    "closing this out: if a vendor genuinely has no U.S.-source "
+                    "income at all, it's unclear why a withholding-tax intake "
+                    "form was submitted in the first place — route back to the "
+                    "vendor to confirm the responses are accurate (e.g. a "
+                    "misread question, or this may not be the right form for "
+                    "their situation) before treating this as settled."
+                ),
             )
         )
 
