@@ -65,6 +65,7 @@ def main():
         "withholding_required",
         "rate_pct",
         "citation",
+        "rationale",
         "confidence",
         "flags",
         "notes",
@@ -90,6 +91,7 @@ def main():
                         "withholding_required": "",
                         "rate_pct": "",
                         "citation": "",
+                        "rationale": "",
                         "confidence": "skipped",
                         "flags": "",
                         "notes": candidate.skip_reason,
@@ -105,6 +107,7 @@ def main():
 
             print(f"    regime={det.regime}  withhold={det.withholding_required}  rate={det.rate}%")
             print(f"    citation: {det.citation}")
+            print(f"    rationale: {det.rationale}")
             if det.confidence == "needs_review":
                 print("    ** NEEDS REVIEW **")
             if det.flags:
@@ -122,6 +125,7 @@ def main():
                     "withholding_required": det.withholding_required,
                     "rate_pct": det.rate if det.rate is not None else "",
                     "citation": det.citation,
+                    "rationale": det.rationale,
                     "confidence": det.confidence,
                     "flags": "; ".join(det.flags),
                     "notes": " | ".join(candidate.notes),

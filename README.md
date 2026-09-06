@@ -164,10 +164,28 @@ engine wants are structurally absent from it:
   types of `Other` or `International organization`. Each skip carries a
   reason in the output rather than silently disappearing.
 
+## Review queue UI (prototype)
+
+A first pass at the human-review queue mentioned below: a Streamlit app
+that reads a determinations CSV (`demo/run_from_vendorhub.py` or
+`demo/run_demo.py` output) and shows each candidate — vendor, proposed
+regime/rate/citation, rationale, confidence, flags — with Approve / Edit /
+Reject actions.
+
+```bash
+pip install -r review_ui/requirements.txt
+python3 demo/run_from_vendorhub.py   # or demo/run_demo.py, to populate a CSV first
+streamlit run review_ui/app.py
+```
+
+**Decisions are session-only — nothing is persisted.** A page refresh
+resets every Approve/Edit/Reject back to pending; wiring that to a real
+datastore is still on the "what isn't built" list below.
+
 ## What isn't built (next steps toward the real architecture)
 
-- The human-review queue UI (a Streamlit app was the plan — vendor,
-  proposed determination, rationale, confidence, approve/edit/reject).
+- Persisting review-queue decisions (Approve/Edit/Reject in `review_ui/`
+  is session-state only right now).
 - The Claude/LLM layer for parsing uploaded W-8 documents and generating
   plain-English reviewer rationale on top of this engine's structured output.
 - The push integration to Oracle's Party Tax Profile REST API (POST/PATCH)
