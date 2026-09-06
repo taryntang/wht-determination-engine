@@ -4,8 +4,10 @@ README: vendor, proposed determination, rationale, confidence, and a
 reviewer's Approve / Override (rate + reasoning) / Reject decision.
 
 Reads and writes wht_determinations directly (via adapters.vendorhub,
-using the Supabase service_role key from .env — never the public anon
-key). Unlike the earlier CSV-viewer prototype, decisions here are
+using the Supabase service_role key — from a local .env for `streamlit
+run`, or from Streamlit Community Cloud's Secrets when deployed there;
+never the public anon key). Unlike the earlier CSV-viewer prototype,
+decisions here are
 persisted: an Approve/Override/Reject click writes review_status,
 override_rate, override_reasoning, reviewer_name, and reviewed_at back to
 the row, and the database's own CHECK constraints (see the migration)
@@ -41,7 +43,23 @@ def _load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip())
 
 
+def _load_cloud_secrets() -> None:
+    """Streamlit Community Cloud injects secrets via st.secrets, not OS env
+    vars. adapters.vendorhub reads os.environ, so bridge the two here
+    rather than changing that module's credential-reading for one hosting
+    target. No-op locally, where st.secrets is empty."""
+    import os
+
+    try:
+        for key in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+            if key in st.secrets:
+                os.environ.setdefault(key, st.secrets[key])
+    except Exception:
+        pass  # no secrets.toml and nothing configured -- fine for local runs
+
+
 _load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+_load_cloud_secrets()
 
 st.set_page_config(page_title="WHT Review Queue", layout="wide")
 
