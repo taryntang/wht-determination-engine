@@ -260,5 +260,6 @@ class StaticThenLiveTreatyTable:
         _record_call(country, payment_type)
         try:
             return fetch_live_treaty_rate(country, payment_type, self._anthropic_api_key)
-        except Exception:
+        except Exception as e:
+            print(f"live_treaty_lookup: live fetch raised for {country}/{payment_type.value}, falling back to static result: {e}")
             return result
