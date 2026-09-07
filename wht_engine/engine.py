@@ -31,7 +31,7 @@ from .regime import (
 )
 from .treaty_rates import DEFAULT_TABLE, TreatyRateTable
 
-ENGINE_VERSION = "wht-engine-demo-0.1.0"
+ENGINE_VERSION = "wht-engine-demo-0.2.0"
 
 SCHOLARSHIP_RATE = Decimal("14")
 
@@ -41,6 +41,8 @@ def determine_withholding(
     as_of: date | None = None,
     treaty_table: TreatyRateTable = DEFAULT_TABLE,
 ) -> Determination:
+    if not payment.gross_amount.is_finite() or payment.gross_amount < 0:
+        raise ValueError("gross_amount must be finite and non-negative")
     as_of = as_of or payment.payment_date
 
     regime, citation, rationale = classify_regime(payment)
@@ -122,7 +124,10 @@ def determine_withholding(
     for w in doc_warnings:
         det.flags.append(f"DOC_WARNING: {w}")
         det.add_event("documentation_validation", w)
+    if doc_warnings:
+        det.confidence = "needs_review"
     det.documentation_required = documentation_required_for(det.regime, payment.payment_type, payment.payee)
 
-    det.add_event("engine", f"Determination completed by {ENGINE_VERSION}.")
+    det.add_event("engine", f"Determination completed by {ENGINE_VERSION}; as_of={as_of.isoformat()}.")
     return det
+

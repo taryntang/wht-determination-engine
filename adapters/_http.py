@@ -43,13 +43,14 @@ def supabase_request(
     if prefer:
         headers["Prefer"] = prefer
 
-    data = json.dumps(body).encode("utf-8") if body is not None else None
+    data = json.dumps(body, allow_nan=False).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
         f"{base_url}/rest/v1/{path_and_query}",
         method=method,
         headers=headers,
         data=data,
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read()
         return json.loads(raw) if raw else None
+
