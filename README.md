@@ -113,12 +113,12 @@ AP notification feed would consume.
   the static table has no row for a country/income-type pair — opt in by
   passing it as `determine_withholding()`'s `treaty_table` argument with
   `ANTHROPIC_API_KEY` set; both `demo/run_from_vendorhub.py` and
-  VendorHub's webhook already do this. **Capped at 2 live lookups/hour**
-  (`LIVE_TREATY_LOOKUP_MAX_PER_HOUR`) via a persistent Supabase ledger —
-  deliberately low, for developer/beta testing only, since each call is a
-  real billable Claude API request and VendorHub's public form has no
-  rate limit tied to treaty-lookup misses specifically. Raise it once
-  this moves past that stage. Table 4 (LOB) still isn't checked by
+  VendorHub's webhook already do this. **No rate limit on this path** —
+  each call is a real billable Claude API request, and VendorHub's public
+  form has no rate limit tied to treaty-lookup misses specifically, so a
+  submission burst using countries outside the static sample can drive
+  real, uncapped API spend. An earlier version capped this at 2/hour;
+  removed by explicit request after that risk was raised. Table 4 (LOB) still isn't checked by
   either path — see the next bullet.
 - **LOB (Table 4) is flagged, not verified.** The engine notes that
   Limitation-on-Benefits eligibility should be confirmed for any treaty

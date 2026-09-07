@@ -108,68 +108,11 @@ def test_static_then_live_falls_back_to_live_on_miss():
         found=True, rate=Decimal("0"), treaty_article="Art. 12", footnote=None,
         table_version="IRS-LIVE-2026-09-07", country="Cyprus", payment_type="royalty_patent",
     )
-    with patch("adapters.live_treaty_lookup._rate_limit_ok", return_value=True), \
-         patch("adapters.live_treaty_lookup._record_call") as mock_record, \
-         patch("adapters.live_treaty_lookup.fetch_live_treaty_rate", return_value=live_result) as mock_live:
+    with patch("adapters.live_treaty_lookup.fetch_live_treaty_rate", return_value=live_result) as mock_live:
         result = table.lookup("Cyprus", PaymentType.ROYALTY_PATENT)
 
     mock_live.assert_called_once()
-    mock_record.assert_called_once()
     assert result is live_result
-
-
-def test_static_then_live_skips_live_lookup_when_rate_limited():
-    static = MagicMock()
-    static_result = TreatyRateResult(
-        found=False, rate=None, treaty_article=None, footnote=None,
-        table_version="SAMPLE-DEMO-v1", country="Cyprus", payment_type="royalty_patent",
-    )
-    static.lookup.return_value = static_result
-    table = StaticThenLiveTreatyTable(static, anthropic_api_key="fake-key")
-
-    with patch("adapters.live_treaty_lookup._rate_limit_ok", return_value=False), \
-         patch("adapters.live_treaty_lookup.fetch_live_treaty_rate") as mock_live:
-        result = table.lookup("Cyprus", PaymentType.ROYALTY_PATENT)
-
-    mock_live.assert_not_called()
-    assert result is static_result
-
-
-def test_rate_limit_ok_counts_recent_calls():
-    from adapters.live_treaty_lookup import _rate_limit_ok, LIVE_TREATY_LOOKUP_MAX_PER_HOUR
-
-    with patch("adapters._http.supabase_request", return_value=[{"id": "1"}]):
-        assert _rate_limit_ok() is True  # 1 < 2
-
-    with patch("adapters._http.supabase_request", return_value=[{"id": "1"}, {"id": "2"}]):
-        assert _rate_limit_ok() is False  # 2 >= LIVE_TREATY_LOOKUP_MAX_PER_HOUR
-
-    assert LIVE_TREATY_LOOKUP_MAX_PER_HOUR == 2
-
-
-def test_rate_limit_ok_url_encodes_the_timestamp():
-    # Regression test: an unencoded '+' in the UTC offset (e.g.
-    # "...+00:00") is misread as a literal space by URL-decoding on the
-    # PostgREST side, which broke this check with a 400 the first time
-    # it ran live (fail-closed correctly kicked in, but the check itself
-    # was broken) -- assert the path passed downstream never contains a
-    # raw '+' or ':' outside the fixed prefix.
-    from adapters.live_treaty_lookup import _rate_limit_ok
-
-    with patch("adapters._http.supabase_request", return_value=[]) as mock_request:
-        _rate_limit_ok()
-
-    called_path = mock_request.call_args[0][1]
-    query_value = called_path.split("called_at=gte.")[1]
-    assert "+" not in query_value
-    assert "%2B" in query_value or "Z" in query_value
-
-
-def test_rate_limit_ok_fails_closed_on_error():
-    from adapters.live_treaty_lookup import _rate_limit_ok
-
-    with patch("adapters._http.supabase_request", side_effect=RuntimeError("unreachable")):
-        assert _rate_limit_ok() is False
 
 
 def test_static_then_live_skips_live_lookup_without_api_key():
@@ -196,9 +139,7 @@ def test_static_then_live_swallows_live_lookup_errors():
     static.lookup.return_value = static_result
     table = StaticThenLiveTreatyTable(static, anthropic_api_key="fake-key")
 
-    with patch("adapters.live_treaty_lookup._rate_limit_ok", return_value=True), \
-         patch("adapters.live_treaty_lookup._record_call"), \
-         patch("adapters.live_treaty_lookup.fetch_live_treaty_rate", side_effect=RuntimeError("network down")):
+    with patch("adapters.live_treaty_lookup.fetch_live_treaty_rate", side_effect=RuntimeError("network down")):
         result = table.lookup("Cyprus", PaymentType.ROYALTY_PATENT)
 
     assert result is static_result

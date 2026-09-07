@@ -20,16 +20,16 @@ never verifies Table 4 (Limitation on Benefits); fdap.py's existing
 CONFIRM_LOB_TABLE_4 flag on every treaty-rate result covers that
 regardless of which source produced the rate.
 
-BETA/TEST RATE LIMIT: each live lookup costs a real, billable Claude API
-call (two PDFs + a response), and VendorHub's public intake form is only
-rate-limited at 30 inserts/5min per table -- not per treaty-lookup-miss --
-so a burst of submissions using countries outside the static sample could
-otherwise trigger unbounded API spend. StaticThenLiveTreatyTable caps
-this at LIVE_TREATY_LOOKUP_MAX_PER_HOUR (2, deliberately low -- this is a
-developer test/beta feature, not tuned for real usage yet) using a
-persistent ledger table (live_treaty_lookup_calls) since Vercel functions
-don't share memory between invocations. Raise the cap once this moves
-past that stage.
+NO RATE LIMIT (deliberate, explicit choice -- 2026-09-07): each live
+lookup is a real, billable Claude API call, and VendorHub's public
+intake form is only rate-limited at 30 inserts/5min per table, not per
+treaty-lookup-miss -- so a burst of submissions using countries outside
+the static sample can trigger real API spend with no cap here. An
+earlier version of this file capped it at 2/hour via a persistent
+Supabase ledger; that cap was removed by explicit user request after
+being told this exact risk. If cost becomes a real problem, the ledger
+table (live_treaty_lookup_calls) still exists in VendorHub's migrations
+and can be reintroduced.
 """
 
 from __future__ import annotations
@@ -37,21 +37,16 @@ from __future__ import annotations
 import base64
 import json
 import re
-import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from adapters import _http
 from wht_engine.models import PaymentType
 from wht_engine.treaty_rates import TreatyRateResult
 
 TABLE_1_URL = "https://www.irs.gov/pub/irs-lbi/tax-treaty-table-1.pdf"
 TABLE_3_URL = "https://www.irs.gov/pub/irs-lbi/table-3-list-of-tax-treaties.pdf"
-
-RATE_LIMIT_TABLE = "live_treaty_lookup_calls"
-LIVE_TREATY_LOOKUP_MAX_PER_HOUR = 2
 
 # Table 1's columns are keyed to specific income sub-types -- matching the
 # skill's own instruction to match the specific column, not just "royalty"
@@ -198,35 +193,6 @@ def fetch_live_treaty_rate(
     )
 
 
-def _rate_limit_ok() -> bool:
-    """True only if we can positively confirm we're under the cap. Any
-    failure to check (Supabase unreachable, credentials missing, ...)
-    fails CLOSED -- skip the live call rather than risk unbounded spend
-    just because the ledger was unreachable."""
-    try:
-        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        # PostgREST reads this off the raw query string -- the '+' in a
-        # UTC offset like "+00:00" is otherwise misread as a literal
-        # space by URL-decoding, breaking the timestamp Postgres receives.
-        since_encoded = urllib.parse.quote(since, safe="")
-        rows = _http.supabase_request("GET", f"{RATE_LIMIT_TABLE}?select=id&called_at=gte.{since_encoded}")
-        return len(rows) < LIVE_TREATY_LOOKUP_MAX_PER_HOUR
-    except Exception as e:
-        print(f"live_treaty_lookup rate-limit check failed, skipping live lookup: {e}")
-        return False
-
-
-def _record_call(country: str, payment_type: PaymentType) -> None:
-    try:
-        _http.supabase_request(
-            "POST", RATE_LIMIT_TABLE,
-            body={"country": country, "payment_type": payment_type.value},
-            prefer="return=minimal",
-        )
-    except Exception as e:
-        print(f"live_treaty_lookup failed to record rate-limit call: {e}")
-
-
 class StaticThenLiveTreatyTable:
     """Same .lookup() interface as wht_engine.treaty_rates.TreatyRateTable
     (duck-typed -- fdap.py just calls .lookup(), doesn't care which this
@@ -234,13 +200,12 @@ class StaticThenLiveTreatyTable:
 
     Tries the static CSV first (fast, free, gives every determination a
     stable version stamp when it has the row); falls back to a live
-    IRS+Claude lookup only on a miss, and only if an API key was supplied
-    and the persistent rate-limit ledger confirms we're under
-    LIVE_TREATY_LOOKUP_MAX_PER_HOUR. A live-lookup failure (network, API,
-    unparseable response, rate limit reached) falls back to the static
-    table's own "not found" result rather than raising -- a treaty-rate
-    lookup failing should degrade to the existing statutory-default path,
-    not break the determination.
+    IRS+Claude lookup only on a miss, and only if an API key was supplied.
+    No rate limit -- see the module docstring. A live-lookup failure
+    (network, API, unparseable response) falls back to the static table's
+    own "not found" result rather than raising -- a treaty-rate lookup
+    failing should degrade to the existing statutory-default path, not
+    break the determination.
     """
 
     def __init__(self, static_table, anthropic_api_key: Optional[str]):
@@ -251,13 +216,6 @@ class StaticThenLiveTreatyTable:
         result = self._static_table.lookup(country, payment_type)
         if result.found or not self._anthropic_api_key:
             return result
-        if not _rate_limit_ok():
-            print(
-                f"live_treaty_lookup: skipping live lookup for {country}/{payment_type.value} "
-                f"-- beta rate limit ({LIVE_TREATY_LOOKUP_MAX_PER_HOUR}/hour) reached"
-            )
-            return result
-        _record_call(country, payment_type)
         try:
             return fetch_live_treaty_rate(country, payment_type, self._anthropic_api_key)
         except Exception as e:
