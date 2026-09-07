@@ -35,14 +35,12 @@ reads vendor_tax_requests, and both reads and writes wht_determinations
 
 from __future__ import annotations
 
-import json
-import os
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Optional
 
+from adapters import _http
 from wht_engine import ENGINE_VERSION
 from wht_engine.models import (
     Determination,
@@ -58,49 +56,12 @@ VENDOR_TAX_REQUESTS_TABLE = "vendor_tax_requests"
 DETERMINATIONS_TABLE = "wht_determinations"
 
 
-def _credentials(supabase_url: Optional[str], service_role_key: Optional[str]) -> tuple[str, str]:
-    supabase_url = supabase_url or os.environ.get("SUPABASE_URL")
-    service_role_key = service_role_key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not supabase_url or not service_role_key:
-        raise RuntimeError(
-            "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must both be set "
-            "(env vars, or a local .env — see .env.example). The service_role "
-            "key is a real secret: never commit it or pass it on the command line."
-        )
-    return supabase_url.rstrip("/"), service_role_key
-
-
-def _supabase_request(
-    method: str,
-    path_and_query: str,
-    supabase_url: Optional[str] = None,
-    service_role_key: Optional[str] = None,
-    body: Optional[Any] = None,
-    prefer: Optional[str] = None,
-) -> Any:
-    """Shared PostgREST request helper. Always uses the service_role key —
-    this module never touches VendorHub's public anon key, which cannot
-    SELECT/UPDATE/INSERT outside its narrow public-facing insert policies.
-    """
-    base_url, service_role_key = _credentials(supabase_url, service_role_key)
-    headers = {
-        "apikey": service_role_key,
-        "Authorization": f"Bearer {service_role_key}",
-        "Content-Type": "application/json",
-    }
-    if prefer:
-        headers["Prefer"] = prefer
-
-    data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(
-        f"{base_url}/rest/v1/{path_and_query}",
-        method=method,
-        headers=headers,
-        data=data,
-    )
-    with urllib.request.urlopen(req) as resp:
-        raw = resp.read()
-        return json.loads(raw) if raw else None
+# Thin aliases onto the shared helper (adapters/_http.py), kept under
+# these names since the rest of this file already calls them this way.
+# Also used directly by adapters/live_treaty_lookup.py for its rate-limit
+# ledger, so the two modules share one Supabase-request implementation.
+_credentials = _http.credentials
+_supabase_request = _http.supabase_request
 
 # entity_type (VendorHub) -> (engine PayeeType or None, note-if-uncertain-or-unmapped)
 PAYEE_TYPE_MAP: dict[str, tuple[Optional[PayeeType], Optional[str]]] = {
