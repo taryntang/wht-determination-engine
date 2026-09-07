@@ -17,11 +17,15 @@ like this should say "I don't know, ask a human" rather than quietly guess.
 ## Why it's built this way
 
 The core design choice: **the actual tax determination is a deterministic,
-versioned rules engine — not an LLM call.** An LLM/agent layer (not built in
-this demo) would sit on top of this engine to parse W-8 documents and
-generate reviewer-facing rationale, but the engine itself is plain,
-testable Python with no model in the loop, so every result is reproducible
-and defensible to an auditor. See `wht_engine/engine.py`'s docstring.
+versioned rules engine — not an LLM call.** An LLM layer sits *around* this
+engine — VendorHub's `w8-extract` function uses Claude to read an uploaded
+W-8 PDF and pull out treaty-claim data — but the determination itself stays
+plain, testable Python with no model in the loop, so every rate/regime
+result is reproducible and defensible to an auditor even though the
+document-reading step that feeds it isn't. See `wht_engine/engine.py`'s
+docstring, and VendorHub's `w8-extract/README.md` for how that boundary is
+kept: extraction output is written to its own columns, flagged as
+unverified, and never presented as more certain than it is.
 
 This mirrors a real control gap: at a company where vendor onboarding
 doesn't flag withholding-relevant vendors to AP, payments go out without
@@ -183,19 +187,30 @@ engine wants are structurally absent from it:
 
 ## Review queue UI
 
-The human-review step: a Streamlit app that reads `wht_determinations`
-live and shows each candidate — vendor, proposed regime/rate/citation,
-rationale, confidence, flags — with Approve / Override / Reject actions.
-**Decisions are persisted immediately**, not session-only: Approve writes
-`review_status='approved'`; Override requires both a new rate and a
-reasoning text and writes `review_status='overridden'` with
-`override_rate`/`override_reasoning`; Reject requires a reasoning and
-writes `review_status='rejected'`. All three stamp `reviewer_name` (a
-free-text attribution field — there's no real authentication yet) and
-`reviewed_at`. The database's own CHECK constraints back this up
-independently of the UI (see the migration) — an unreasoned override or
-rejection is rejected at the database layer even if the UI's own check
-were ever bypassed.
+**The real reviewer experience now lives in VendorHub itself**:
+`public/portal.html` in the [VendorHub repo](https://github.com/taryntang/vendorhub),
+gated behind real Supabase Auth (not a free-text name field) — its Tax
+Review tab does the same Approve/Override/Reject job described below,
+plus a fourth outcome (Ask Vendor) and a Reasoning Results tab, all
+reading/writing `wht_determinations` directly from the browser via RLS.
+See that repo's README and `SECURITY.md` for how staff access is scoped.
+
+This repo also ships a lighter, standalone alternative that reads the
+same table — a Streamlit app, still functional, useful for a quick local
+look without deploying anything:
+
+- vendor, proposed regime/rate/citation, rationale, confidence, flags —
+  with Approve / Override / Reject actions. **Decisions are persisted
+  immediately**, not session-only: Approve writes `review_status='approved'`;
+  Override requires both a new rate and a reasoning text and writes
+  `review_status='overridden'` with `override_rate`/`override_reasoning`;
+  Reject requires a reasoning and writes `review_status='rejected'`. All
+  three stamp `reviewer_name` (a free-text attribution field here — this
+  standalone app has no login, unlike the portal above) and `reviewed_at`.
+  The database's own CHECK constraints back this up independently of the
+  UI (see the migration) — an unreasoned override or rejection is
+  rejected at the database layer even if the UI's own check were ever
+  bypassed.
 
 ```bash
 pip install -r review_ui/requirements.txt
@@ -205,15 +220,14 @@ streamlit run review_ui/app.py
 
 ## What isn't built (next steps toward the real architecture)
 
-- Real reviewer authentication (`reviewer_name` in `review_ui/` is a
-  free-text field, not a login).
-- An automatic trigger from VendorHub submission to engine run — today
-  `demo/run_from_vendorhub.py` is run by hand; a Supabase database webhook
-  on `vendor_tax_requests` insert is the natural next step.
-- The Claude/LLM layer for parsing uploaded W-8 documents and generating
-  plain-English reviewer rationale on top of this engine's structured output.
+- Distinct staff roles/permissions in the VendorHub portal — any
+  authenticated account currently has the same access as any other.
+- Plain-English, LLM-generated reviewer rationale on top of this engine's
+  structured output (distinct from W-8 *document extraction*, which
+  VendorHub's `w8-extract` function now does via Claude).
 - The push integration to Oracle's Party Tax Profile REST API (POST/PATCH)
   once IT confirms the tenant has that service enabled, gated on reviewer
   approval.
-- Persisting determinations + audit trail to a real datastore instead of a
-  CSV, and the SQL-side reconciliation/control-total reporting layer.
+- Persisting the engine's full step-by-step `audit_trail` (not just the
+  summary fields) to `wht_determinations`, and the SQL-side
+  reconciliation/control-total reporting layer.
