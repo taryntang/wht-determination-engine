@@ -147,6 +147,24 @@ def test_rate_limit_ok_counts_recent_calls():
     assert LIVE_TREATY_LOOKUP_MAX_PER_HOUR == 2
 
 
+def test_rate_limit_ok_url_encodes_the_timestamp():
+    # Regression test: an unencoded '+' in the UTC offset (e.g.
+    # "...+00:00") is misread as a literal space by URL-decoding on the
+    # PostgREST side, which broke this check with a 400 the first time
+    # it ran live (fail-closed correctly kicked in, but the check itself
+    # was broken) -- assert the path passed downstream never contains a
+    # raw '+' or ':' outside the fixed prefix.
+    from adapters.live_treaty_lookup import _rate_limit_ok
+
+    with patch("adapters._http.supabase_request", return_value=[]) as mock_request:
+        _rate_limit_ok()
+
+    called_path = mock_request.call_args[0][1]
+    query_value = called_path.split("called_at=gte.")[1]
+    assert "+" not in query_value
+    assert "%2B" in query_value or "Z" in query_value
+
+
 def test_rate_limit_ok_fails_closed_on_error():
     from adapters.live_treaty_lookup import _rate_limit_ok
 

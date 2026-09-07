@@ -37,6 +37,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -199,7 +200,11 @@ def _rate_limit_ok() -> bool:
     just because the ledger was unreachable."""
     try:
         since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        rows = _http.supabase_request("GET", f"{RATE_LIMIT_TABLE}?select=id&called_at=gte.{since}")
+        # PostgREST reads this off the raw query string -- the '+' in a
+        # UTC offset like "+00:00" is otherwise misread as a literal
+        # space by URL-decoding, breaking the timestamp Postgres receives.
+        since_encoded = urllib.parse.quote(since, safe="")
+        rows = _http.supabase_request("GET", f"{RATE_LIMIT_TABLE}?select=id&called_at=gte.{since_encoded}")
         return len(rows) < LIVE_TREATY_LOOKUP_MAX_PER_HOUR
     except Exception as e:
         print(f"live_treaty_lookup rate-limit check failed, skipping live lookup: {e}")
