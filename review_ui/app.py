@@ -28,6 +28,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from adapters.vendorhub import fetch_determinations, set_review_decision
+from review_ui.state import displayed_version
 
 
 def _load_dotenv(path: Path) -> None:
@@ -76,6 +77,12 @@ reviewer_name = st.sidebar.text_input(
 )
 st.session_state["reviewer_name"] = reviewer_name
 
+if st.sidebar.button("Reload proposals"):
+    for key in list(st.session_state):
+        if key.startswith("displayed-version:"):
+            del st.session_state[key]
+    st.rerun()
+
 try:
     rows = fetch_determinations()
 except RuntimeError as e:
@@ -117,7 +124,7 @@ filtered = [
 
 total = len(rows)
 pending = sum(1 for r in rows if r["review_status"] == "pending")
-needs_review = sum(1 for r in rows if r.get("confidence") == "needs_review")
+needs_review = sum(1 for r in rows if r.get("needs_review", True))
 skipped = sum(1 for r in rows if r.get("confidence") == "skipped")
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -143,8 +150,17 @@ def _refresh():
     st.rerun()
 
 
+def _save_decision(*args, **kwargs):
+    try:
+        return set_review_decision(*args, **kwargs)
+    except Exception:
+        st.error("Could not save the decision. It may have changed or already been reviewed. Reload and inspect the latest proposal.")
+        st.stop()
+
+
 for row in filtered:
     det_id = row["id"]
+    seen_version = displayed_version(st.session_state, det_id, row.get("proposal_version", 1))
     status_badge = STATUS_BADGE.get(row["review_status"], "")
     conf_icon = CONFIDENCE_ICON.get(row.get("confidence") or "", "")
 
@@ -171,6 +187,12 @@ for row in filtered:
                 if row.get("notes"):
                     st.write(f"**Notes:** {row['notes']}")
 
+            st.write(f"**Proposal version:** {row.get('proposal_version', 1)}")
+            st.write(f"**Payment amount:** {row.get('gross_amount')}" if row.get("amount_known") else "**Payment amount:** unknown — rate review only")
+            st.write(f"**Rate table:** {row.get('rate_table_version') or 'Not applicable / not captured'}")
+            st.json(row.get("audit_trail", []))
+            st.json({"payment": row.get("payment_snapshot", {}), "document": row.get("document_snapshot", {}), "vendor / extraction": row.get("vendor_snapshot", {})})
+
             if row["review_status"] != "pending":
                 st.divider()
                 st.write(f"**Reviewer:** {row.get('reviewer_name', '')}")
@@ -182,6 +204,12 @@ for row in filtered:
                     st.write(f"**Rejection reasoning:** {row.get('override_reasoning', '')}")
 
         with right:
+            if seen_version != row.get("proposal_version", 1):
+                st.warning("This proposal changed since you viewed it. Use Reload proposals, then review the updated facts.")
+                continue
+            if row["review_status"] != "pending":
+                st.caption("Decision saved. Reviewed proposals are retained unchanged; submit a new case for corrected facts.")
+                continue
             if row.get("confidence") == "skipped":
                 st.caption("Skipped candidates aren't reviewable here — classify manually.")
                 continue
@@ -189,8 +217,8 @@ for row in filtered:
             if not reviewer_name.strip():
                 st.info("Enter your name in the sidebar to record decisions.")
 
-            if st.button("Approve", key=f"approve-{det_id}", disabled=not reviewer_name.strip()):
-                set_review_decision(det_id, "approved", reviewer_name.strip())
+            if st.button("Approve", key=f"approve-{det_id}", disabled=not reviewer_name.strip() or row.get("rate") is None):
+                _save_decision(det_id, "approved", reviewer_name.strip(), expected_version=seen_version)
                 _refresh()
 
             st.write("**Override**")
@@ -212,10 +240,11 @@ for row in filtered:
                 if not override_reasoning.strip():
                     st.error("Reasoning is required to save an override.")
                 else:
-                    set_review_decision(
+                    _save_decision(
                         det_id,
                         "overridden",
                         reviewer_name.strip(),
+                        expected_version=seen_version,
                         override_rate=override_rate,
                         override_reasoning=override_reasoning.strip(),
                     )
@@ -224,10 +253,12 @@ for row in filtered:
                 if not override_reasoning.strip():
                     st.error("Reasoning is required to reject a determination.")
                 else:
-                    set_review_decision(
+                    _save_decision(
                         det_id,
                         "rejected",
                         reviewer_name.strip(),
+                        expected_version=seen_version,
                         override_reasoning=override_reasoning.strip(),
                     )
                     _refresh()
+

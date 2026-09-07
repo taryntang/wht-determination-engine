@@ -35,9 +35,11 @@ reads vendor_tax_requests, and both reads and writes wht_determinations
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from urllib.parse import quote
+import json
 from typing import Optional
 
 from adapters import _http
@@ -130,6 +132,8 @@ class Candidate:
     payment: Optional[Payment] = None
     notes: list[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
+    amount_known: bool = False
+    source_snapshot: dict = field(default_factory=dict)
 
 
 def fetch_vendor_tax_requests(
@@ -165,27 +169,47 @@ def upsert_determination(
     resetting its engine-derived columns — review_status/override fields
     are only ever written by set_review_decision, never here.
     """
-    if determination is None:
-        row = {
-            "vendor_request_id": candidate.vendor_request_id,
-            "category": candidate.category_label,
-            "confidence": "skipped",
-            "notes": candidate.skip_reason,
-        }
-    else:
-        row = {
-            "vendor_request_id": candidate.vendor_request_id,
-            "category": candidate.category_label,
+    # Always send the full proposal shape, including NULLs, so a newly
+    # skipped candidate cannot retain an old rate or rationale.
+    def serializable(value):
+        return json.loads(json.dumps(value, default=str))
+
+    payment = candidate.payment
+    row = {
+        "vendor_request_id": candidate.vendor_request_id,
+        "category": candidate.category_label,
+        "regime": None, "withholding_required": None, "rate": None,
+        "citation": None, "rationale": None, "confidence": "skipped",
+        "flags": None, "notes": candidate.skip_reason,
+        "engine_version": ENGINE_VERSION, "audit_trail": [],
+        "rate_table_version": None, "needs_review": True,
+        "amount_known": candidate.amount_known and payment is not None,
+        "gross_amount": str(payment.gross_amount) if payment and candidate.amount_known else None,
+        "withholding_amount": None,
+        "payment_snapshot": serializable(asdict(payment)) if payment else {},
+        "document_snapshot": serializable(asdict(payment.payee.documentation)) if payment else {},
+        "vendor_snapshot": candidate.source_snapshot or {
+            "id": candidate.vendor_request_id, "vendor_number": candidate.vendor_id,
+            "legal_name": candidate.vendor_name,
+        },
+    }
+    if determination is not None:
+        row.update({
             "regime": determination.regime,
             "withholding_required": determination.withholding_required,
-            "rate": float(determination.rate) if determination.rate is not None else None,
+            "rate": str(determination.rate) if determination.rate is not None else None,
             "citation": determination.citation,
             "rationale": determination.rationale,
             "confidence": determination.confidence,
-            "flags": "; ".join(determination.flags) if determination.flags else None,
-            "notes": " | ".join(candidate.notes) if candidate.notes else None,
-            "engine_version": ENGINE_VERSION,
-        }
+            "flags": "; ".join(determination.flags) or None,
+            "notes": " | ".join(candidate.notes) or None,
+            "audit_trail": serializable([asdict(event) for event in determination.audit_trail]),
+            "rate_table_version": determination.rate_table_version,
+            "needs_review": determination.confidence == "needs_review" or bool(candidate.notes)
+                or bool(determination.flags) or not row["amount_known"],
+            "withholding_amount": str(determination.withholding_amount)
+                if row["amount_known"] and determination.withholding_amount is not None else None,
+        })
 
     result = _supabase_request(
         "POST",
@@ -222,6 +246,7 @@ def set_review_decision(
     override_reasoning: Optional[str] = None,
     supabase_url: Optional[str] = None,
     service_role_key: Optional[str] = None,
+    *, expected_version: int = 1,
 ) -> dict:
     """Records a tax reviewer's decision on one determination. review_status
     must be 'approved', 'overridden', or 'rejected' — the database itself
@@ -233,21 +258,41 @@ def set_review_decision(
     if review_status not in ("approved", "overridden", "rejected"):
         raise ValueError(f"Invalid review_status: {review_status!r}")
 
+    if not reviewer_name.strip():
+        raise ValueError("Reviewer name is required")
+    if type(expected_version) is not int or expected_version < 1:
+        raise ValueError("Expected proposal version must be a positive integer")
+    reason = (override_reasoning or "").strip()
+    if review_status in ("overridden", "rejected") and not reason:
+        raise ValueError("Reasoning is required")
+    if review_status == "overridden":
+        try:
+            rate = Decimal(str(override_rate))
+        except InvalidOperation as exc:
+            raise ValueError("A finite override rate from 0 to 100 is required") from exc
+        if not rate.is_finite() or not 0 <= rate <= 100:
+            raise ValueError("A finite override rate from 0 to 100 is required")
+    elif override_rate is not None:
+        raise ValueError("Only an override may carry an override rate")
+
     body = {
         "review_status": review_status,
-        "reviewer_name": reviewer_name,
+        "reviewer_name": reviewer_name.strip(),
         "override_rate": override_rate,
-        "override_reasoning": override_reasoning,
+        "override_reasoning": reason or None,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
     }
     result = _supabase_request(
         "PATCH",
-        f"{DETERMINATIONS_TABLE}?id=eq.{determination_id}",
+        f"{DETERMINATIONS_TABLE}?id=eq.{quote(determination_id, safe='')}"
+        f"&review_status=eq.pending&proposal_version=eq.{expected_version}",
         supabase_url,
         service_role_key,
         body=body,
         prefer="return=representation",
     )
+    if not result:
+        raise ValueError("Proposal changed or was already reviewed; reload before reviewing")
     return result[0] if isinstance(result, list) else result
 
 
@@ -324,6 +369,11 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
             vendor_request_id=vendor_request_id,
             vendor_id=vendor_id,
             vendor_name=vendor_name,
+            source_snapshot={k: v for k, v in row.items() if k in (
+                "id", "vendor_number", "legal_name", "reg_country", "entity_type",
+                "contact_name", "contact_email", "w8_type", "w8_filename",
+                "w8_extraction_status", "w8_extraction_method", "w8_treaty_country_claimed",
+                "w8_treaty_article", "w8_signed_date", "w8_expiration_date")},
             **kwargs,
         )
 
@@ -475,3 +525,4 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
         )
 
     return candidates
+

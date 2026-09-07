@@ -179,7 +179,9 @@ def fetch_live_treaty_rate(
     except json.JSONDecodeError:
         return _not_found(country, payment_type, table_version, "Claude's response wasn't valid JSON.")
 
-    if not parsed.get("treaty_in_force") or not parsed.get("found_in_table1") or parsed.get("rate_pct") is None:
+    if not isinstance(parsed, dict):
+        return _not_found(country, payment_type, table_version, "Invalid structured result")
+    if parsed.get("treaty_in_force") is not True or parsed.get("found_in_table1") is not True or parsed.get("rate_pct") is None:
         print(
             f"live_treaty_lookup: not found for {country}/{payment_type.value} -- "
             f"treaty_in_force={parsed.get('treaty_in_force')} found_in_table1={parsed.get('found_in_table1')} "
@@ -191,6 +193,9 @@ def fetch_live_treaty_rate(
         rate = Decimal(str(parsed["rate_pct"]))
     except (InvalidOperation, TypeError):
         return _not_found(country, payment_type, table_version, parsed.get("notes"))
+
+    if isinstance(parsed["rate_pct"], bool) or not rate.is_finite() or not 0 <= rate <= 100:
+        return _not_found(country, payment_type, table_version, "Invalid rate; manual review required")
 
     return TreatyRateResult(
         found=True,
@@ -231,3 +236,4 @@ class StaticThenLiveTreatyTable:
         except Exception as e:
             print(f"live_treaty_lookup: live fetch raised for {country}/{payment_type.value}, falling back to static result: {e}")
             return result
+
