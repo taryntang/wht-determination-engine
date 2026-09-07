@@ -33,8 +33,8 @@ def test_category_marked_outside_us_produces_no_candidate():
     assert candidates[0].payment is None
 
 
-def test_us_source_rental_produces_a_runnable_candidate():
-    row = _row(q3_rental="A")
+def test_us_source_real_property_rental_produces_a_runnable_candidate():
+    row = _row(q3b_real_property="A")
     candidates = map_row_to_candidates(row)
     runnable = [c for c in candidates if c.payment is not None]
     assert len(runnable) == 1
@@ -45,6 +45,19 @@ def test_us_source_rental_produces_a_runnable_candidate():
     det = determine_withholding(payment)
     assert det.regime == "FDAP"
     assert det.rate == Decimal("30")  # no treaty details captured -> statutory default
+
+
+def test_movable_property_rental_is_skipped_not_guessed():
+    # Confirmed by reading the real IRS Table 1 PDF directly: "movable
+    # property rental" spans four genuinely different columns (Industrial
+    # Equipment / Know-How / Patents / Copyrights) with different rates
+    # per country -- same ambiguity as Q5's royalty subtype, same fix.
+    row = _row(q3_rental="A")
+    candidates = map_row_to_candidates(row)
+    assert len(candidates) == 1
+    assert candidates[0].payment is None
+    assert candidates[0].skip_reason is not None
+    assert "movable property is being rented" in candidates[0].skip_reason
 
 
 def test_both_answer_also_produces_a_candidate():
@@ -112,7 +125,7 @@ def test_unmodeled_entity_type_is_skipped_entirely():
 
 
 def test_w8_on_file_without_treaty_details_still_defaults_to_statutory_rate():
-    row = _row(q3_rental="A", w8_type="W-8BEN-E")
+    row = _row(q3b_real_property="A", w8_type="W-8BEN-E")
     candidates = map_row_to_candidates(row)
     runnable = [c for c in candidates if c.payment is not None]
     det = determine_withholding(runnable[0].payment)

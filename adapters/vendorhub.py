@@ -105,10 +105,12 @@ _W8_TYPE_TO_DOC_FORM = {
 
 # Each VendorHub sourcing question that has a modeled engine PaymentType
 # equivalent. q1_goods (sale of goods) has no entry: sale of goods is not
-# FDAP income and isn't modeled by this engine at all.
+# FDAP income and isn't modeled by this engine at all. q3_rental keeps a
+# None payment_type like q5_royalties -- both are explicitly skipped
+# below rather than guessed at (see map_row_to_candidates).
 _CATEGORY_QUESTIONS: list[tuple[str, str, Optional[PaymentType]]] = [
     ("q2_services", "services (Q2)", PaymentType.COMPENSATION_SERVICES),
-    ("q3_rental", "movable-property rental (Q3)", PaymentType.RENT),
+    ("q3_rental", "movable-property rental (Q3)", None),  # subtype ambiguous, see below
     ("q3b_real_property", "real-property rental (Q3b)", PaymentType.RENT),
     ("q4_server", "licensed-software fees (Q4)", PaymentType.ROYALTY_COPYRIGHT),
     ("q5_royalties", "patent/copyright royalties (Q5)", None),  # subtype ambiguous, see below
@@ -366,6 +368,31 @@ def map_row_to_candidates(row: dict) -> list[Candidate]:
                         "etc.) is not captured by the intake form and the "
                         "engine's treaty rates differ by subtype — classify "
                         "manually before running through the engine."
+                    ),
+                )
+            )
+            continue
+
+        # Q3 (movable-property rental): confirmed by reading the real IRS
+        # Table 1 PDF directly (2026-09-07) that "rental of movable
+        # property" doesn't correspond to one column -- depending on what's
+        # actually being rented, it could be Industrial Equipment, Know-How/
+        # Other Industrial Royalties, Patents, or Copyrights, each a
+        # genuinely different rate for the same country (e.g. Cyprus: n/a,
+        # 0%, 0%, 0% respectively -- not remotely interchangeable). Same
+        # problem as Q5's patent-vs-copyright ambiguity, same fix: skip
+        # rather than pick one and silently hand a reviewer an unverified
+        # rate.
+        if column == "q3_rental":
+            candidates.append(
+                _candidate(
+                    category_label=label,
+                    skip_reason=(
+                        "What kind of movable property is being rented "
+                        "(equipment, licensed IP, software, know-how) is not "
+                        "captured by the intake form, and the real IRS Table "
+                        "1 gives genuinely different rates for each — "
+                        "classify manually before running through the engine."
                     ),
                 )
             )

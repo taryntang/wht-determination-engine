@@ -189,8 +189,12 @@ engine wants are structurally absent from it:
   it against the physical document.
 - **Some categories/entity types aren't modeled and are skipped rather than
   guessed**: sale of goods (not FDAP at all), an ambiguous patent-vs-copyright
-  royalty subtype, and entity types of `Other` or `International organization`.
-  Each skip carries a reason in the output rather than silently disappearing.
+  royalty subtype, movable-property rental (confirmed by reading the real
+  IRS Table 1 directly that it spans four genuinely different columns —
+  Industrial Equipment / Know-How / Patents / Copyrights — with different
+  rates per country, not one), and entity types of `Other` or
+  `International organization`. Each skip carries a reason in the output
+  rather than silently disappearing.
 - **Services performed in the U.S. by a non-individual payee** (corporation,
   partnership, etc.) are mapped to the FDAP catch-all with `is_eci` set only
   if a W-8ECI is actually on file — not to personal-services/payroll routing,

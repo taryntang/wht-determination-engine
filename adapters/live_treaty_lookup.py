@@ -59,16 +59,17 @@ _INCOME_TYPE_DESCRIPTIONS = {
     PaymentType.ROYALTY_INDUSTRIAL_EQUIPMENT: "royalties -- industrial equipment rental",
     PaymentType.ROYALTY_KNOW_HOW: "royalties -- know-how / other industrial royalties",
     PaymentType.ROYALTY_FILM_TV: "royalties -- motion picture and television",
-    # Confirmed by reading the real Table 1 PDF directly (2026-09-07): its
-    # royalty columns are Industrial Equipment / Know-How / Patents /
-    # Film & TV / Copyrights -- there is no separate "rents" column.
-    # Rental of movable/industrial property is the Industrial Equipment
-    # royalty column, not a distinct category. (Real-property rental has
-    # no Table 1 column at all -- treaties generally route that income
-    # through a separate Income from Real Property article instead, so
-    # "not found here" is likely the correct answer for that one, not a
-    # gap -- left unmapped deliberately rather than guessed at.)
-    PaymentType.RENT: "royalties -- industrial equipment (movable/industrial property rental is filed under this column, not a separate 'rents' column, in the real Table 1)",
+    # PaymentType.RENT is deliberately absent: adapters/vendorhub.py maps
+    # it only to real-property rental (Q3b) as of 2026-09-07 -- movable-
+    # property rental (Q3) is now skipped upstream instead of guessed at,
+    # after confirming by reading the real Table 1 PDF directly that it
+    # spans four genuinely different columns (Industrial Equipment /
+    # Know-How / Patents / Copyrights) with different rates per country,
+    # not one. Real-property rental has no Table 1 column at all either --
+    # treaties generally route that income through a separate Income from
+    # Real Property article instead -- so RENT has no correct column to
+    # point at here regardless. An unmapped income type correctly returns
+    # "not found" without an API call (see fetch_live_treaty_rate below).
 }
 
 
