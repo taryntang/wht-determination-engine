@@ -223,8 +223,11 @@ payment through the files and explain what each layer owns.
 
 ## Future-state
 
-Oracle supplier/payment configuration APIs, AP/GL booking reconciliation,
-production reviewer authorization, original-PDF retention in this repo,
-full reference-input archival, and reopen/re-review workflow remain future
-work. This portfolio demo must not be described as a production tax system
+- **Oracle supplier/payment configuration APIs
+- **AP/GL booking reconciliation, production reviewer authorization
+- **Original-PDF retention in this repo
+- **Full reference-input archival
+_ **Reopen/re-review workflow remain future work
+
+This portfolio demo must not be described as a production tax system
 or as having posted withholding to Oracle.
