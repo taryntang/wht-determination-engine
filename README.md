@@ -159,10 +159,17 @@ engine wants are structurally absent from it:
 - **No payment amount.** Every candidate's `gross_amount` is a `Decimal("0")`
   placeholder — `regime`, `rate`, and `citation` are meaningful, `withholding_amount`
   is not, until a real payment is known.
-- **No treaty claim details.** VendorHub records a W-8 *type* but not a
-  treaty country/article/expiration, so the engine correctly falls back to
-  the 30% statutory rate even for vendors who may actually have a valid
-  treaty claim on the physical document. Flagged on every affected row.
+- **Treaty claim details, when available, come from an async extraction step,
+  not the intake form itself.** VendorHub's `vendorhub/w8-extract` function
+  reads the actual uploaded W-8 PDF (form fields first, Claude as a fallback
+  for flattened/scanned copies) and writes `w8_treaty_country_claimed` /
+  `w8_treaty_article` / `w8_signed_date` / `w8_expiration_date` back onto the
+  row once it completes — `_build_documentation()` here picks those up when
+  present. Until extraction finishes (or if it finds no claim), the engine
+  still correctly falls back to the 30% statutory rate, flagged on every
+  affected row either way — extraction results are never independently
+  verified, so a treaty rate applied this way still needs a human to confirm
+  it against the physical document.
 - **Some categories/entity types aren't modeled and are skipped rather than
   guessed**: sale of goods (not FDAP at all), an ambiguous patent-vs-copyright
   royalty subtype, and entity types of `Other` or `International organization`.

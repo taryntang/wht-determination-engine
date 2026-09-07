@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from adapters.vendorhub import map_row_to_candidates
@@ -124,3 +125,49 @@ def test_no_us_source_category_yields_single_none_candidate():
     candidates = map_row_to_candidates(row)
     assert len(candidates) == 1
     assert candidates[0].category_label == "(none)"
+
+
+def test_extracted_treaty_details_apply_a_real_treaty_rate():
+    row = _row(
+        q4_server="A",
+        w8_type="W-8BEN-E",
+        w8_extraction_status="extracted",
+        w8_extraction_method="claude",
+        w8_treaty_country_claimed="United Kingdom",
+        w8_treaty_article="Art. 12",
+        w8_signed_date="2026-01-15",
+        w8_expiration_date="2029-01-15",
+    )
+    candidates = map_row_to_candidates(row)
+    runnable = [c for c in candidates if c.payment is not None]
+    det = determine_withholding(runnable[0].payment, as_of=date(2026, 6, 1))
+    assert det.rate == Decimal("0")  # UK/royalty_copyright is 0% in the sample treaty table
+    assert det.citation.startswith("Treaty rate")
+    assert any("extracted from the uploaded" in note for note in runnable[0].notes)
+
+
+def test_expired_extracted_treaty_falls_back_to_statutory_rate():
+    row = _row(
+        q4_server="A",
+        w8_type="W-8BEN-E",
+        w8_extraction_status="extracted",
+        w8_extraction_method="claude",
+        w8_treaty_country_claimed="United Kingdom",
+        w8_treaty_article="Art. 12",
+        w8_signed_date="2020-01-15",
+        w8_expiration_date="2023-01-15",
+    )
+    candidates = map_row_to_candidates(row)
+    runnable = [c for c in candidates if c.payment is not None]
+    det = determine_withholding(runnable[0].payment, as_of=date(2026, 6, 1))
+    assert det.rate == Decimal("30")
+    assert "DOCUMENTATION_EXPIRED" in det.flags
+
+
+def test_extraction_found_no_treaty_claim_notes_say_so():
+    row = _row(q4_server="A", w8_type="W-8BEN-E", w8_extraction_status="no_data")
+    candidates = map_row_to_candidates(row)
+    runnable = [c for c in candidates if c.payment is not None]
+    det = determine_withholding(runnable[0].payment)
+    assert det.rate == Decimal("30")
+    assert any("found no treaty claim" in note for note in runnable[0].notes)

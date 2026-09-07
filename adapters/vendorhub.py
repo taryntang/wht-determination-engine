@@ -39,7 +39,7 @@ import json
 import os
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -288,20 +288,62 @@ def set_review_decision(
     return result[0] if isinstance(result, list) else result
 
 
+def _parse_date(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _build_documentation(row: dict) -> tuple[Documentation, list[str]]:
     notes = []
     w8_type = row.get("w8_type")
     form = _W8_TYPE_TO_DOC_FORM.get(w8_type, DocForm.NONE)
-    if form is not DocForm.NONE:
+    if form is DocForm.NONE:
+        return Documentation(form=form), notes
+
+    treaty_country = row.get("w8_treaty_country_claimed")
+    treaty_article = row.get("w8_treaty_article")
+    extraction_status = row.get("w8_extraction_status")
+
+    if treaty_country:
         notes.append(
-            f"{form.value} on file per intake form, but VendorHub does not "
-            "capture a treaty country/article or expiration date, so no "
-            "treaty claim can be evaluated here even if one exists — the "
-            "engine will fall back to the 30% statutory rate on that basis "
-            "alone. Confirm the actual W-8 document for a treaty claim "
-            "before relying on the statutory-rate result."
+            f"Treaty claim (country: {treaty_country}"
+            + (f", article: {treaty_article}" if treaty_article else ", article not extracted")
+            + f") was extracted from the uploaded {form.value} "
+            f"(method: {row.get('w8_extraction_method') or 'unknown'}) rather than typed "
+            "into the intake form. Automated extraction is not independently "
+            "verified — confirm against the physical document before relying "
+            "on the resulting treaty rate."
         )
-    return Documentation(form=form), notes
+    elif extraction_status in ("pending", None):
+        notes.append(
+            f"{form.value} on file per intake form, but its treaty details "
+            "haven't been extracted yet (extraction runs asynchronously after "
+            "submission) — the engine will fall back to the 30% statutory rate "
+            "until that completes and this determination is re-run."
+        )
+    else:
+        # extraction_status in ('no_data', 'failed') or ran and found no claim
+        notes.append(
+            f"{form.value} on file per intake form; treaty-detail extraction "
+            f"completed (status: {extraction_status}) but found no treaty claim "
+            "to apply — the engine falls back to the 30% statutory rate. "
+            "Confirm the actual W-8 document before relying on that."
+        )
+
+    return (
+        Documentation(
+            form=form,
+            treaty_country_claimed=treaty_country,
+            treaty_article=treaty_article,
+            signed_date=_parse_date(row.get("w8_signed_date")),
+            expiration_date=_parse_date(row.get("w8_expiration_date")),
+        ),
+        notes,
+    )
 
 
 def map_row_to_candidates(row: dict) -> list[Candidate]:
