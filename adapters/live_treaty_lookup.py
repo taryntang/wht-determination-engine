@@ -175,6 +175,11 @@ def fetch_live_treaty_rate(
         return _not_found(country, payment_type, table_version, "Claude's response wasn't valid JSON.")
 
     if not parsed.get("treaty_in_force") or not parsed.get("found_in_table1") or parsed.get("rate_pct") is None:
+        print(
+            f"live_treaty_lookup: not found for {country}/{payment_type.value} -- "
+            f"treaty_in_force={parsed.get('treaty_in_force')} found_in_table1={parsed.get('found_in_table1')} "
+            f"rate_pct={parsed.get('rate_pct')!r} notes={parsed.get('notes')!r}"
+        )
         return _not_found(country, payment_type, table_version, parsed.get("notes"))
 
     try:
