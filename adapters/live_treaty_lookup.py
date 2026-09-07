@@ -59,7 +59,16 @@ _INCOME_TYPE_DESCRIPTIONS = {
     PaymentType.ROYALTY_INDUSTRIAL_EQUIPMENT: "royalties -- industrial equipment rental",
     PaymentType.ROYALTY_KNOW_HOW: "royalties -- know-how / other industrial royalties",
     PaymentType.ROYALTY_FILM_TV: "royalties -- motion picture and television",
-    PaymentType.RENT: "rents",
+    # Confirmed by reading the real Table 1 PDF directly (2026-09-07): its
+    # royalty columns are Industrial Equipment / Know-How / Patents /
+    # Film & TV / Copyrights -- there is no separate "rents" column.
+    # Rental of movable/industrial property is the Industrial Equipment
+    # royalty column, not a distinct category. (Real-property rental has
+    # no Table 1 column at all -- treaties generally route that income
+    # through a separate Income from Real Property article instead, so
+    # "not found here" is likely the correct answer for that one, not a
+    # gap -- left unmapped deliberately rather than guessed at.)
+    PaymentType.RENT: "royalties -- industrial equipment (movable/industrial property rental is filed under this column, not a separate 'rents' column, in the real Table 1)",
 }
 
 
