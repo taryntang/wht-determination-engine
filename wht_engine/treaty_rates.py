@@ -15,12 +15,27 @@ on this vendor eight months ago" has a real answer.
 Rates here approximate real treaty patterns for demo purposes but are NOT
 guaranteed current or complete (e.g. direct-dividend ownership thresholds,
 LOB provisions, and many footnote conditions from the real IRS Table 1 are
-simplified or omitted — see the `footnote` column). Before this engine (or
-any fork of it) is used for a real determination, the table must be
-refreshed from the live IRS tables:
+simplified or omitted — see the `footnote` column), and it only covers 11
+countries — a country simply absent from this file (e.g. Cyprus) means
+"not in this sample," never "confirmed no treaty" (Singapore is the one
+row that actually is a confirmed no-treaty case).
+
+The three tables below are cited as the source this data approximates —
+citing them here does not mean this class checks them. Only Table 1 is
+actually read (into the CSV, offline, by whoever refreshes it); Table 3
+and Table 4 are never consulted by this class at all, for any row:
   Table 1 (FDAP rates):        https://www.irs.gov/pub/irs-lbi/tax-treaty-table-1.pdf
   Table 3 (treaties in force): https://www.irs.gov/pub/irs-lbi/table-3-list-of-tax-treaties.pdf
   Table 4 (LOB):               https://www.irs.gov/pub/irs-lbi/Tax_Treaty_Table_4.pdf
+
+For a lookup that actually fetches and reads Table 1 and Table 3 live
+(closer to what the withholding-tax-foreign skill this engine is built
+from specifies — "never assume a typical rate," always retrieve it live)
+see adapters/live_treaty_lookup.py's StaticThenLiveTreatyTable, a drop-in
+treaty_table for determine_withholding() that tries this static table
+first and only falls back to a live fetch on a miss. Table 4 (LOB) still
+isn't checked by either path — fdap.py's CONFIRM_LOB_TABLE_4 flag on
+every treaty-rate result is what stands in for that, regardless of source.
 """
 
 from __future__ import annotations

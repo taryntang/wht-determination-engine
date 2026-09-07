@@ -104,9 +104,17 @@ AP notification feed would consume.
 
 ## Limitations (intentionally not modeled, or simplified)
 
-- **Treaty rate table is sample/demo data.** Before any real use, refresh
-  it from the live IRS tables (Table 1: FDAP rates, Table 3: treaties in
-  force, Table 4: Limitation on Benefits) — see `wht_engine/treaty_rates.py`.
+- **Treaty rate table is sample/demo data, 11 countries only.** A country
+  simply absent from it (e.g. Cyprus) means "not in this sample," not
+  "confirmed no treaty" — Singapore is the one row that's an actual
+  confirmed-no-treaty case. `adapters/live_treaty_lookup.py`'s
+  `StaticThenLiveTreatyTable` closes this gap by falling back to a live
+  fetch of the real IRS Table 1 + Table 3 PDFs (read by Claude) whenever
+  the static table has no row for a country/income-type pair — opt in by
+  passing it as `determine_withholding()`'s `treaty_table` argument with
+  `ANTHROPIC_API_KEY` set; both `demo/run_from_vendorhub.py` and
+  VendorHub's webhook already do this. Table 4 (LOB) still isn't checked
+  by either path — see the next bullet.
 - **LOB (Table 4) is flagged, not verified.** The engine notes that
   Limitation-on-Benefits eligibility should be confirmed for any treaty
   claim, especially for entity payees, but does not implement that test.

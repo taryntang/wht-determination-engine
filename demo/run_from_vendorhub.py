@@ -22,6 +22,7 @@ Run: python3 demo/run_from_vendorhub.py
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from datetime import date
 from decimal import Decimal
@@ -29,8 +30,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from adapters.live_treaty_lookup import StaticThenLiveTreatyTable
 from adapters.vendorhub import fetch_vendor_tax_requests, map_row_to_candidates, upsert_determination
-from wht_engine import determine_withholding
+from wht_engine import DEFAULT_TABLE, determine_withholding
 
 AS_OF = date.today()
 
@@ -38,8 +40,6 @@ AS_OF = date.today()
 def _load_dotenv(path: Path) -> None:
     """Tiny .env loader so this stays dependency-free — does not override
     variables already set in the real environment."""
-    import os
-
     if not path.exists():
         return
     for line in path.read_text().splitlines():
@@ -59,6 +59,12 @@ def main():
     if not rows:
         print("No vendor_tax_requests rows found.")
         return
+
+    # Falls back to a live IRS Table 1/3 + Claude lookup only when the
+    # static sample table has no row for a country/income-type pair, and
+    # only if ANTHROPIC_API_KEY is set -- otherwise behaves exactly like
+    # the static-only DEFAULT_TABLE. See adapters/live_treaty_lookup.py.
+    treaty_table = StaticThenLiveTreatyTable(DEFAULT_TABLE, os.environ.get("ANTHROPIC_API_KEY"))
 
     fieldnames = [
         "vendor_id",
@@ -104,7 +110,7 @@ def main():
                 print()
                 continue
 
-            det = determine_withholding(candidate.payment, as_of=AS_OF)
+            det = determine_withholding(candidate.payment, as_of=AS_OF, treaty_table=treaty_table)
             upsert_determination(candidate, det)
             n_determined += 1
             if det.confidence == "needs_review":
